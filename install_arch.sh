@@ -13,7 +13,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/dialogs.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/disk_strategies.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/chroot_config.sh"
 
-
 # --- Configuration Loading Logic ---
 
 # Variable to store the path of the config file to load
