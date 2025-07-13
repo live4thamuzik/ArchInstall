@@ -1,3 +1,4 @@
+#!/bin/bash
 # utils.sh - General helper functions for Archl4tm rewrite
 
 # ANSI escape codes for colors
