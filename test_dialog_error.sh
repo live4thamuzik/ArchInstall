@@ -25,12 +25,12 @@ prompt_yes_no() {
 }
 
 # --- Core Logic to test the problematic line ---
-# Source config.sh to get REFLECTOR_COUNTRY_CODE
+# Source config.sh (assuming it's in the same directory)
 source ./config.sh
 
 echo "Attempting to run the problematic line..."
 # The problematic line from dialogs.sh's gather_installation_details
-local use_default_mirror_country=""
+use_default_mirror_country="" # REMOVED 'local' keyword here
 prompt_yes_no "Use default mirror country (${REFLECTOR_COUNTRY_CODE})? " use_default_mirror_country
 
 echo "Script completed successfully."
