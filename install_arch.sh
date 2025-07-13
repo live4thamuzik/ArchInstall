@@ -16,25 +16,28 @@ source "$(dirname "${BASH_SOURCE[0]}")/chroot_config.sh"
 
 # --- Configuration Loading Logic ---
 # Variable to store the path of the config file to load
-LOAD_CONFIG_FILE=""
+LOAD_CONFIG_FILE="" # Initialized to empty
 
 # 1. Check for command-line argument for config file
-if [ -n "${1:-}" ] && [ -f "$1" ]; then
-    LOAD_CONFIG_FILE="$1"
-    log_info "Command-line argument specified config: $LOAD_CONFIG_FILE"
-elif [ -n "${1:-}" ]; then
-    log_warn "Command-line argument '$1' is not a valid file. Ignoring."
+if [ -n "${1:-}" ]; then # Check if $1 is even provided
+    if [ -f "$1" ]; then # Check if it's a valid, existing file
+        LOAD_CONFIG_FILE="$1"
+        log_info "Command-line argument specified config: $LOAD_CONFIG_FILE"
+    else
+        log_warn "Command-line argument '$1' is not a valid file. Ignoring."
+        # CRITICAL FIX: Reset LOAD_CONFIG_FILE to empty so prompt_load_config is called next.
+        LOAD_CONFIG_FILE=""
+    fi
 fi
 
-# 2. If no CLI argument, prompt the user to load a saved config
-if [ -z "$LOAD_CONFIG_FILE" ]; then
+# 2. If no config path determined from CLI, prompt the user to load a saved config
+if [ -z "$LOAD_CONFIG_FILE" ]; then # This correctly checks if it's empty after CLI check
     LOAD_CONFIG_FILE=$(prompt_load_config)
     # prompt_load_config will return an empty string if user chooses not to load.
-    # The logic below handles the empty string correctly.
 fi
 
 # 3. Attempt to load the configuration file if a path was identified
-if [ -n "$LOAD_CONFIG_FILE" ]; then # Only try to source if LOAD_CONFIG_FILE is not empty
+if [ -n "$LOAD_CONFIG_FILE" ]; then # This is the main guard for 'source'
     log_header "Loading Configuration from '$LOAD_CONFIG_FILE'"
     # The 'source' command must succeed for the script to continue.
     source "$LOAD_CONFIG_FILE" || error_exit "Failed to load configuration from '$LOAD_CONFIG_FILE'."
