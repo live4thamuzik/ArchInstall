@@ -13,8 +13,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/dialogs.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/disk_strategies.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/chroot_config.sh"
 
-# --- Configuration Loading Logic ---
 
+# --- Configuration Loading Logic ---
 # Variable to store the path of the config file to load
 LOAD_CONFIG_FILE=""
 
@@ -29,24 +29,24 @@ fi
 # 2. If no CLI argument, prompt the user to load a saved config
 if [ -z "$LOAD_CONFIG_FILE" ]; then
     LOAD_CONFIG_FILE=$(prompt_load_config)
-    if [ -n "$LOAD_CONFIG_FILE" ]; then
-        log_info "User selected config to load: $LOAD_CONFIG_FILE"
-    else
-        log_info "No configuration file selected for loading. Will proceed with manual configuration."
-    fi
+    # prompt_load_config will return an empty string if user chooses not to load.
+    # The logic below handles the empty string correctly.
 fi
 
-# 3. Load the configuration file if determined
-if [ -n "$LOAD_CONFIG_FILE" ]; then
+# 3. Attempt to load the configuration file if a path was identified
+if [ -n "$LOAD_CONFIG_FILE" ]; then # Only try to source if LOAD_CONFIG_FILE is not empty
     log_header "Loading Configuration from '$LOAD_CONFIG_FILE'"
-    # Source the loaded config file. It will override defaults from config.sh
-    # Passwords are NOT loaded, so they'll be prompted later.
+    # The 'source' command must succeed for the script to continue.
     source "$LOAD_CONFIG_FILE" || error_exit "Failed to load configuration from '$LOAD_CONFIG_FILE'."
     log_success "Configuration loaded from '$LOAD_CONFIG_FILE'."
     CONFIG_LOADED="yes"
 else
+    # If LOAD_CONFIG_FILE is empty (because prompt_load_config returned empty or CLI arg was invalid/ignored)
+    log_info "No configuration file selected for loading. Proceeding with manual configuration."
     CONFIG_LOADED="no"
 fi
+# --- End Configuration Loading Logic ---
+
 
 # --- Main Installation Function ---
 main() {
@@ -63,7 +63,6 @@ main() {
     if [ "$CONFIG_LOADED" == "yes" ]; then
         log_info "Configuration loaded. Displaying summary for review and collecting passwords."
         # If config is loaded, we skip most prompts but still need passwords
-        # This will call secure_password_input directly
         if [ "$WANT_ENCRYPTION" == "yes" ]; then
             secure_password_input "Enter LUKS encryption passphrase (for loaded config): " LUKS_PASSPHRASE
         fi
