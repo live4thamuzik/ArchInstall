@@ -15,7 +15,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/chroot_config.sh"
 
 
 # --- Configuration Loading Logic ---
-set -x
 
 # Variable to store the path of the config file to load
 LOAD_CONFIG_FILE=""
@@ -49,8 +48,6 @@ if [ -n "$LOAD_CONFIG_FILE" ]; then
 else
     CONFIG_LOADED="no"
 fi
-
-set +x
 
 # --- Main Installation Function ---
 main() {
