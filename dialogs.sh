@@ -208,7 +208,7 @@ gather_installation_details() {
             log_warn "Proceeding assuming 64-bit UEFI, but manual verification is recommended if issues arise."
         fi
 
-        prompt_yes_no "Force BIOS/Legacy boot mode instead of UEFI? (For specific VM setups or troubleshooting)" OVERRIDE_BOOT_MODE
+        prompt_yes_no "Force BIOS/Legacy boot mode instead of UEFI?" OVERRIDE_BOOT_MODE
         if [ "$OVERRIDE_BOOT_MODE" == "yes" ]; then
             BOOT_MODE="bios"
             log_warn "Forcing BIOS/Legacy boot mode."
