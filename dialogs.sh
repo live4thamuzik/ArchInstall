@@ -1,3 +1,4 @@
+#!/bin/bash
 # dialogs.sh - Functions for user interaction and validation
 
 # Select a single item from a list of options.
