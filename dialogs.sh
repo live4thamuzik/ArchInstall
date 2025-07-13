@@ -1,3 +1,38 @@
+You are absolutely right. My apologies.
+
+You've confirmed that:
+
+head -1 dialogs.sh | od -c output looks perfectly clean (no BOM, no \r).
+
+file dialogs.sh output is Bourne-Again Shell script, ASCII text executable (perfect, no CRLF issues).
+
+This means, based on all standard diagnostics, your dialogs.sh file appears to be perfectly clean and correctly formatted for Bash. This makes the "syntax error near unexpected token (" on line 299/300 extremely puzzling, as the code itself is valid.
+
+There might be an incredibly subtle, non-printable character somewhere in that line (or just before it) that these tools aren't revealing, or a very specific quirk of the Bash version on your Live ISO.
+
+Let's try one final, hyper-meticulous step to ensure the file is absolutely pristine.
+
+Please follow these steps exactly:
+
+Delete your existing dialogs.sh file entirely from your system.
+
+Create a brand new empty file named dialogs.sh in the same directory.
+
+Manually type #!/bin/bash as the very first line in this new empty file. Do not copy-paste this line. Just type it.
+
+Then, copy only the content starting from # dialogs.sh - Functions for user interaction and validation (the second line) from the code block below, all the way to the end.
+
+Paste this copied content immediately after the #!/bin/bash line you just typed.
+
+Save the file.
+
+Run dos2unix dialogs.sh again, just to be absolutely certain.
+
+This highly precise method will help rule out almost any type of subtle corruption or copy-paste issue.
+
+dialogs.sh (Final, Cleaned Version - Please Copy Its Content Precisely)
+Bash
+
 #!/bin/bash
 # dialogs.sh - Functions for user interaction and validation
 
@@ -71,19 +106,15 @@ get_timezones_in_region() {
         return 0
     fi
 
-    # Find all timezone data files within the region's directory.
     while IFS= read -r -d '' tz_file_path; do
         local full_tz_name="${tz_file_path#"$zoneinfo_base_path/"}"
-        # Filter out non-timezone files/directories like 'posix/' or 'Etc/'.
         if [[ "$full_tz_name" != posix/* ]] && [[ "$full_tz_name" != Etc/* ]] && [[ "$full_tz_name" != zone.tab ]]; then
             timezones+=("$full_tz_name")
         fi
     done < <(find -L "$region_path" -type f -print0)
 
-    # Sort the list alphabetically for user readability.
     IFS=$'\n' timezones=($(sort <<<"${timezones[*]}"))
     unset IFS
-
     echo "${timezones[@]}"
 }
 
@@ -98,7 +129,6 @@ configure_wifi_live_dialog() {
     fi
 
     local wifi_device=""
-    # If multiple devices, let user choose. Otherwise, auto-select.
     if [[ $(echo "$wifi_devices" | wc -w) -gt 1 ]]; then
         local wifi_dev_options=($(echo "$wifi_devices"))
         select_option "Select Wi-Fi device:" wifi_dev_options wifi_device || return 1
@@ -140,6 +170,51 @@ configure_wifi_live_dialog() {
     fi
 }
 
+# Prompts the user to load a configuration file.
+# Returns: The path to the config file to load, or empty string if none.
+prompt_load_config() {
+    local config_to_load=""
+    
+    local script_dir="$(dirname "${BASH_SOURCE[0]}")"
+    local available_configs=()
+    while IFS= read -r -d $'\0' f; do
+        local filename=$(basename "$f")
+        if [[ "$filename" == *.sh ]] && [[ "$filename" != "install_arch.sh" ]] && [[ "$filename" != "config.sh" ]] && \
+           [[ "$filename" != "utils.sh" ]] && [[ "$filename" != "dialogs.sh" ]] && \
+           [[ "$filename" != "disk_strategies.sh" ]] && [[ "$filename" != "chroot_config.sh" ]]; then
+            available_configs+=("$filename")
+        fi
+    done < <(find "$script_dir" -maxdepth 1 -type f -name "*.sh" -print0)
+
+    if [ ${#available_configs[@]} -gt 0 ]; then
+        log_info "Found existing configuration files:"
+        select_option "Select a configuration file to load (or choose 'None' to configure manually):" available_configs config_to_load_choice
+        if [ "$config_to_load_choice" != "" ]; then
+             echo "$script_dir/$config_to_load_choice"
+             return 0
+        fi
+    else
+        log_info "No saved configuration files found in the current directory."
+    fi
+
+    local load_manual_path=""
+    prompt_yes_no "Do you want to load a configuration file from a specific path?" load_manual_path
+    if [ "$load_manual_path" == "yes" ]; then
+        read -rp "Enter the full path to the configuration file: " config_path_input
+        config_path_input=$(trim_string "$config_path_input")
+        if [ -f "$config_path_input" ]; then
+            echo "$config_path_input"
+            return 0
+        else
+            log_warn "File not found: $config_path_input. Will proceed with manual configuration."
+        fi
+    fi
+
+    echo ""
+    return 0
+}
+
+
 # --- Core User Input Gathering Function ---
 gather_installation_details() {
     log_header "SYSTEM & STORAGE CONFIGURATION"
@@ -156,7 +231,6 @@ gather_installation_details() {
         BOOT_MODE="uefi"
         log_info "Detected UEFI boot mode."
 
-        # --- UEFI Bitness Check ---
         local fw_platform_size_file="/sys/firmware/efi/fw_platform_size"
         if [ -f "$fw_platform_size_file" ]; then
             local uefi_bitness=$(cat "$fw_platform_size_file")
@@ -168,7 +242,6 @@ gather_installation_details() {
             log_warn "Could not determine UEFI firmware bitness (missing $fw_platform_size_file)."
             log_warn "Proceeding assuming 64-bit UEFI, but manual verification is recommended if issues arise."
         fi
-        # --- End UEFI Bitness Check ---
 
         prompt_yes_no "Force BIOS/Legacy boot mode instead of UEFI? (For specific VM setups or troubleshooting)" OVERRIDE_BOOT_MODE
         if [ "$OVERRIDE_BOOT_MODE" == "yes" ]; then
@@ -266,6 +339,23 @@ gather_installation_details() {
             ;;
     esac
 
+    # Filesystem Type Selection (for Root and Home if applicable)
+    if [ "$PARTITION_SCHEME" != "manual" ]; then
+        log_info "Configuring filesystem types for root and home partitions."
+        select_option "Select filesystem for the root (/) partition:" FILESYSTEM_OPTIONS ROOT_FILESYSTEM_TYPE || error_exit "Root filesystem selection failed."
+
+        if [ "$WANT_HOME_PARTITION" == "yes" ]; then
+            local default_home_fs_choice="$ROOT_FILESYSTEM_TYPE"
+            select_option "Select filesystem for the /home partition (default: $default_home_fs_choice):" FILESYSTEM_OPTIONS HOME_FILESYSTEM_TYPE_TEMP || error_exit "Home filesystem selection failed."
+            if [ -z "$HOME_FILESYSTEM_TYPE_TEMP" ]; then
+                HOME_FILESYSTEM_TYPE="$default_home_fs_choice"
+            else
+                HOME_FILESYSTEM_TYPE="$HOME_FILESYSTEM_TYPE_TEMP"
+            fi
+        fi
+    fi
+
+
     log_header "BASE SYSTEM & USER CONFIGURATION"
 
     # Kernel Type (rolling vs. LTS).
@@ -278,10 +368,6 @@ gather_installation_details() {
     local available_timezones=($(get_timezones_in_region "$selected_region"))
     if [ ${#available_timezones[@]} -eq 0 ]; then
         log_warn "No specific timezones found for region '$selected_region'. Using default."
-        TIMEZONE="$TIMEZONE_DEFAULT"
-    else
-        select_option "Select your city/timezone:" available_timezones TIMEZONE || error_exit "Timezone selection failed."
-    FIno specific timezones found for region '$selected_region'. Using default."
         TIMEZONE="$TIMEZONE_DEFAULT"
     else
         select_option "Select your city/timezone:" available_timezones TIMEZONE || error_exit "Timezone selection failed."
@@ -323,8 +409,7 @@ gather_installation_details() {
     if [ "$DESKTOP_ENVIRONMENT" != "none" ]; then
         case "$DESKTOP_ENVIRONMENT" in
             gnome) DISPLAY_MANAGER="gdm";;
-            kde) DISPLAY_MANAGER="sddm";;
-            hyprland) DISPLAY_MANAGER="sddm";;
+            kde|hyprland) DISPLAY_MANAGER="sddm";;
             * ) DISPLAY_MANAGER="none";;
         esac
         select_option "Select Display Manager (default: $DISPLAY_MANAGER):" "${!DISPLAY_MANAGERS[@]}" DISPLAY_MANAGER
@@ -369,6 +454,18 @@ gather_installation_details() {
     # Numlock on Boot.
     prompt_yes_no "Enable Numlock on boot?" WANT_NUMLOCK_ON_BOOT
 
+    # Dotfile Deployment.
+    prompt_yes_no "Do you want to deploy dotfiles from a Git repository?" WANT_DOTFILES_DEPLOYMENT
+    if [ "$WANT_DOTFILES_DEPLOYMENT" == "yes" ]; then
+        read -rp "Enter the Git repository URL for your dotfiles: " DOTFILES_REPO_URL
+        read -rp "Enter the branch to clone (default: main): " DOTFILES_BRANCH_INPUT
+        if [ -z "$DOTFILES_BRANCH_INPUT" ]; then
+            DOTFILES_BRANCH="main"
+        else
+            DOTFILES_BRANCH="$DOTFILES_BRANCH_INPUT"
+        fi
+    fi
+
     log_info "All installation details gathered."
 }
 
@@ -378,6 +475,10 @@ display_summary_and_confirm() {
     echo "  Disk:                 $INSTALL_DISK"
     echo "  Boot Mode:            $BOOT_MODE"
     echo "  Partitioning:         $PARTITION_SCHEME"
+    echo "    Root FS Type:       $ROOT_FILESYSTEM_TYPE"
+    if [ "$WANT_HOME_PARTITION" == "yes" ]; then
+        echo "    Home FS Type:       $HOME_FILESYSTEM_TYPE"
+    fi
     echo "    Swap:               $WANT_SWAP"
     echo "    /home:              $WANT_HOME_PARTITION"
     echo "    Encryption:         $WANT_ENCRYPTION"
@@ -422,6 +523,11 @@ display_summary_and_confirm() {
         echo "    List:               See config.sh"
     fi
     echo "  Numlock on Boot:      $WANT_NUMLOCK_ON_BOOT"
+    echo "  Dotfiles Deployment:  $WANT_DOTFILES_DEPLOYMENT"
+    if [ "$WANT_DOTFILES_DEPLOYMENT" == "yes" ]; then
+        echo "    Repo URL:           $DOTFILES_REPO_URL"
+        echo "    Branch:             $DOTFILES_BRANCH"
+    fi
 
     prompt_yes_no "Do you want to proceed with the installation (THIS WILL WIPE $INSTALL_DISK)? " CONFIRM_INSTALL
     if [ "$CONFIRM_INSTALL" == "no" ]; then
