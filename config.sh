@@ -1,3 +1,4 @@
+#!/bin/bash
 # config.sh - All configurable options and package lists for Archl4tm
 
 # --- Installation Parameters (Populated by dialogs.sh or defaults) ---
