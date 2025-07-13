@@ -1,3 +1,4 @@
+#!/bin/bash
 # chroot_config.sh - Functions for post-base-install (chroot) configurations
 
 perform_chroot_configurations() {
