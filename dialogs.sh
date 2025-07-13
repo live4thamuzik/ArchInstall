@@ -144,7 +144,6 @@ prompt_load_config() {
     local available_configs=()
     while IFS= read -r -d $'\0' f; do
         local filename=$(basename "$f")
-        # Filter out scripts and only list potential config files
         if [[ "$filename" == *.sh ]] && \
            [[ "$filename" != "install_arch.sh" ]] && \
            [[ "$filename" != "config.sh" ]] && \
@@ -164,11 +163,9 @@ prompt_load_config() {
         select_option "Select a configuration file to load (or choose 'None' to configure manually):" available_configs config_choice_result
 
         if [ "$config_choice_result" == "None (configure manually)" ] || [ -z "$config_choice_result" ]; then
-            # User explicitly chose None, or didn't select a file from the list
             log_info "Proceeding with manual configuration."
             # Fall through to manual path prompt or return empty
         else
-            # User selected a file from the list
             echo "$script_dir/$config_choice_result"
             return 0 # Return the selected path
         fi
@@ -193,6 +190,7 @@ prompt_load_config() {
     echo "" # Return an empty string if no valid config file was selected or provided
     return 0
 }
+
 
 # --- Core User Input Gathering Function ---
 gather_installation_details() {
