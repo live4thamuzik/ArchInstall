@@ -1,6 +1,6 @@
-# 🅰️ ArchInstall - A Tasteful Arch Linux Installer
+# 🅰️ ArchInstall - Arch Linux Installer
 
-> Modular, interactive, and flexible Arch Linux installation powered by Bash — perfect for power users and newcomers alike.
+> Modular, interactive, and flexible Arch Linux installation powered by Bash
 
 ---
 
@@ -96,8 +96,7 @@ Choose from pre-defined DE/DM pairs or customize your own:
 
 * GNOME + GDM
 * KDE Plasma + SDDM
-* XFCE + LightDM
-* Cinnamon, MATE, i3, and more
+* Hyprland + SDDM
 
 ---
 
