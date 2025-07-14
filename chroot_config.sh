@@ -1,114 +1,128 @@
 #!/bin/bash
 # chroot_config.sh - Functions for post-base-install (chroot) configurations
+# This script is designed to be copied into the /mnt environment and executed by arch-chroot.
 
-perform_chroot_configurations() {
-    log_info "Entering chroot environment for post-installation configuration..."
-    arch-chroot /mnt /bin/bash <<EOF
-        set -euo pipefail
+# Strict mode for this script
+set -euo pipefail
 
-        # --- Re-define basic logging functions for use inside chroot ---
-        _log_info() { echo -e "\e[32m[INFO]\e[0m \$(date +%T) \$1"; }
-        _log_warn() { echo -e "\e[33m[WARN]\e[0m \$(date +%T) \$1" >&2; }
-        _log_error() { echo -e "\e[31m[ERROR]\e[0m \$(date +%T) \$1" >&2; exit 1; }
-        _log_success() { echo -e "\n\e[32;1m==================================================\e[0m\n\e[32;1m \$1 \e[0m\n\e[32;1m==================================================\e[0m\n"; }
+# Source its own copy of config.sh and utils.sh from its copied location
+SOURCE_DIR_IN_CHROOT="/opt/archl4tm"
+source "$SOURCE_DIR_IN_CHROOT/config.sh"
+source "$SOURCE_DIR_IN_CHROOT/utils.sh"
 
-        _log_info "Setting system clock and timezone..."
-        ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
-        hwclock --systohc
+# Re-define basic logging functions to ensure they are available within this script's context.
+# These will override the log_* from utils.sh that might be sourced, but are safer for this context
+# and ensure consistency if utils.sh is modified.
+_log_info() { echo -e "\e[32m[INFO]\e[0m \$(date +%T) \$1"; }
+_log_warn() { echo -e "\e[33m[WARN]\e[0m \$(date +%T) \$1" >&2; }
+_log_error() { echo -e "\e[31m[ERROR]\e[0m \$(date +%T) \$1" >&2; exit 1; }
+_log_success() { echo -e "\n\e[32;1m==================================================\e[0m\n\e[32;1m \$1 \e[0m\n\e[32;1m==================================================\e[0m\n"; }
 
-        _log_info "Setting localization (locale, keymap)..."
-        echo "LANG=$LOCALE" > /etc/locale.conf
-        sed -i "/^#$(echo "$LOCALE" | sed 's/\./\\./g')/s/^#//" /etc/locale.gen
-        locale-gen
 
-        echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
+# Main function for chroot configuration - this is now the entry point for this script
+main_chroot_config() {
+    _log_info "Starting chroot configurations within target system."
 
-        _log_info "Setting hostname and /etc/hosts..."
-        echo "$SYSTEM_HOSTNAME" > /etc/hostname
-        # Overwrite /etc/hosts cleanly instead of appending
-        cat <<EOT > /etc/hosts
+    # --- Phase 1: Basic System Configuration ---
+    _log_info "Configuring time, locale, hostname, and basic user setup."
+
+    _log_info "Setting system clock and timezone..."
+    ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime || _log_error "Failed to set timezone symlink."
+    hwclock --systohc || _log_error "Failed to sync hardware clock."
+
+    _log_info "Setting localization (locale, keymap)..."
+    echo "LANG=$LOCALE" > /etc/locale.conf || _log_error "Failed to set locale.conf."
+    sed -i "/^#$(echo "$LOCALE" | sed 's/\./\\./g')/s/^#//" /etc/locale.gen || _log_error "Failed to uncomment locale in locale.gen."
+    locale-gen || _log_error "Failed to generate locales."
+    echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf || _log_error "Failed to set vconsole.conf."
+
+    _log_info "Setting hostname and /etc/hosts..."
+    echo "$SYSTEM_HOSTNAME" > /etc/hostname || _log_error "Failed to set hostname."
+    cat <<EOT > /etc/hosts
 127.0.0.1 localhost
 ::1       localhost
 127.0.1.1 $SYSTEM_HOSTNAME.localdomain $SYSTEM_HOSTNAME
 EOT
+    _log_info "/etc/hosts configured."
 
-        _log_info "Setting root password..."
-        echo "root:$ROOT_PASSWORD" | chpasswd
+    _log_info "Setting root password..."
+    echo "root:$ROOT_PASSWORD" | chpasswd || _log_error "Failed to set root password."
 
-        _log_info "Creating main user: $MAIN_USERNAME..."
-        if id -u "$MAIN_USERNAME" &>/dev/null; then
-            _log_warn "User '$MAIN_USERNAME' already exists. Skipping user creation."
-        else
-            useradd -m -G wheel -s /bin/bash "$MAIN_USERNAME" || _log_error "Failed to create user '$MAIN_USERNAME'."
-            echo "$MAIN_USERNAME:$MAIN_USER_PASSWORD" | chpasswd || _log_error "Failed to set password for '$MAIN_USERNAME'."
-            # Use /etc/sudoers.d/ for safer sudoers editing
-            echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel-sudo || _log_error "Failed to configure sudoers."
-            chmod 0440 /etc/sudoers.d/10-wheel-sudo || _log_error "Failed to set permissions on sudoers file."
-        fi
-
-        _log_info "Installing and configuring bootloader ($BOOTLOADER_TYPE)..."
-        configure_bootloader_chroot || exit 1 # Calls sub-function within chroot
-
-        _log_info "Configuring GRUB default settings..."
-        configure_grub_defaults_chroot || exit 1
-
-        _log_info "Configuring GRUB theme..."
-        configure_grub_theme_chroot || exit 1
-
-        _log_info "Installing Desktop Environment: $DESKTOP_ENVIRONMENT..."
-        if [[ -n "${DESKTOP_ENVIRONMENTS[$DESKTOP_ENVIRONMENT]}" ]]; then
-            install_packages_chroot ${DESKTOP_ENVIRONMENTS[$DESKTOP_ENVIRONMENT]} || exit 1
-        fi
-
-        _log_info "Installing Display Manager: $DISPLAY_MANAGER..."
-        if [[ -n "${DISPLAY_MANAGERS[$DISPLAY_MANAGER]}" ]]; then
-            install_packages_chroot ${DISPLAY_MANAGERS[$DISPLAY_MANAGER]} || exit 1
-            enable_systemd_service_chroot "$DISPLAY_MANAGER" || exit 1
-        fi
-        
-        _log_info "Installing GPU Drivers..."
-        install_gpu_drivers_chroot || exit 1
-
-        _log_info "Installing CPU Microcode..."
-        install_microcode_chroot || exit 1
-
-        _log_info "Configuring mkinitcpio hooks and rebuilding initramfs..."
-        configure_mkinitpio_hooks_chroot || exit 1 # Fix mkinitpio typo
-
-        _log_info "Enabling Multilib repository..."
-        enable_multilib_chroot || exit 1
-
-        _log_info "Installing AUR Helper..."
-        install_aur_helper_chroot || exit 1
-
-        _log_info "Installing Flatpak..."
-        install_flatpak_chroot || exit 1
-
-        _log_info "Installing Custom Packages..."
-        install_custom_packages_chroot || exit 1
-
-        _log_info "Deploying Dotfiles..."
-        deploy_dotfiles_chroot || exit 1
-
-        _log_info "Configuring Numlock on boot..."
-        configure_numlock_chroot || exit 1
-
-        _log_info "Saving mdadm.conf for RAID arrays..."
-        save_mdadm_conf_chroot || exit 1
-
-        _log_info "Enabling essential services..."
-        enable_systemd_service_chroot "NetworkManager"
-
-        _log_info "Chroot configuration complete."
-EOF
-    local chroot_status=$?
-    if [ "$chroot_status" -ne 0 ]; then
-        error_exit "Chroot environment exited with status $chroot_status."
+    _log_info "Creating main user: $MAIN_USERNAME..."
+    if id -u "$MAIN_USERNAME" &>/dev/null; then
+        _log_warn "User '$MAIN_USERNAME' already exists. Skipping user creation."
+    else
+        useradd -m -G wheel -s /bin/bash "$MAIN_USERNAME" || _log_error "Failed to create user '$MAIN_USERNAME'."
+        echo "$MAIN_USERNAME:$MAIN_USER_PASSWORD" | chpasswd || _log_error "Failed to set password for '$MAIN_USERNAME'."
+        echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel-sudo || _log_error "Failed to configure sudoers."
+        chmod 0440 /etc/sudoers.d/10-wheel-sudo || _log_error "Failed to set permissions on sudoers file."
     fi
+
+    # --- Phase 2: Bootloader & Initramfs ---
+    _log_info "Configuring bootloader, GRUB defaults, theme, and mkinitcpio hooks."
+    configure_bootloader_chroot || _log_error "Bootloader installation failed."
+
+    configure_grub_defaults_chroot || _log_error "GRUB default configuration failed."
+
+    configure_grub_theme_chroot || _log_error "GRUB theme configuration failed."
+
+    configure_grub_cmdline_chroot || _log_error "GRUB kernel command line configuration failed."
+
+    configure_mkinitcpio_hooks_chroot || _log_error "Mkinitcpio hooks configuration or initramfs rebuild failed."
+
+
+    # --- Phase 3: Desktop Environment & Drivers ---
+    _log_info "Installing Desktop Environment: $DESKTOP_ENVIRONMENT..."
+    if [[ -n "${DESKTOP_ENVIRONMENTS[$DESKTOP_ENVIRONMENT]}" ]]; then
+        install_packages_chroot ${DESKTOP_ENVIRONMENTS[$DESKTOP_ENVIRONMENT]} || _log_error "Desktop Environment packages installation failed."
+    fi
+
+    _log_info "Installing Display Manager: $DISPLAY_MANAGER..."
+    if [[ -n "${DISPLAY_MANAGERS[$DISPLAY_MANAGER]}" ]]; then
+        install_packages_chroot ${DISPLAY_MANAGERS[$DISPLAY_MANAGER]} || _log_error "Display Manager packages installation failed."
+        enable_systemd_service_chroot "$DISPLAY_MANAGER" || _log_error "Failed to enable Display Manager service."
+    fi
+    
+    _log_info "Installing GPU Drivers..."
+    install_gpu_drivers_chroot || _log_error "GPU driver installation failed."
+
+    _log_info "Installing CPU Microcode..."
+    install_microcode_chroot || _log_error "CPU Microcode installation failed."
+
+
+    # --- Phase 4: Optional Software & User Customization ---
+    _log_info "Enabling Multilib repository..."
+    enable_multilib_chroot || _log_error "Multilib repository configuration failed."
+
+    _log_info "Installing AUR Helper..."
+    install_aur_helper_chroot || _log_error "AUR Helper installation failed."
+
+    _log_info "Installing Flatpak..."
+    install_flatpak_chroot || _log_error "Flatpak installation failed."
+
+    _log_info "Installing Custom Packages..."
+    install_custom_packages_chroot || _log_error "Custom packages installation failed."
+
+    _log_info "Deploying Dotfiles..."
+    deploy_dotfiles_chroot || _log_error "Dotfile deployment failed."
+
+    _log_info "Configuring Numlock on boot..."
+    configure_numlock_chroot || _log_error "Numlock on boot configuration failed."
+
+    _log_info "Saving mdadm.conf for RAID arrays..."
+    save_mdadm_conf_chroot || _log_error "Mdadm.conf saving failed."
+
+
+    # --- Phase 5: Final System Services ---
+    _log_info "Enabling essential system services..."
+    enable_systemd_service_chroot "NetworkManager" || _log_error "Failed to enable NetworkManager service."
+
+    _log_success "Chroot configuration complete."
 }
 
-# --- Functions that run INSIDE chroot, called from perform_chroot_configurations ---
-# Note: These functions will use the _log_* variants defined in the heredoc above.
+# --- Functions called by main_chroot_config (run INSIDE chroot context) ---
+# These functions do NOT have 'arch-chroot /mnt' prefixes.
+# They implicitly run within the chroot. They use the _log_* variants for logging.
 
 configure_bootloader_chroot() {
     case "$BOOTLOADER_TYPE" in
@@ -119,7 +133,7 @@ configure_bootloader_chroot() {
             else
                 grub-install "$INSTALL_DISK" || _log_error "GRUB BIOS installation failed."
             fi
-            grub-mkconfig -o /boot/grub/grub.cfg || _log_error "GRUB configuration generation failed."
+            # grub-mkconfig is called by main_chroot_config after all GRUB settings are done.
             ;;
         systemd-boot)
             _log_info "Installing systemd-boot..."
@@ -133,7 +147,6 @@ configure_bootloader_chroot() {
 }
 
 # Helper to clone a Git repository inside the chroot.
-# Note: This function runs INSIDE the chroot. 'git' must be installed there.
 # Args: $1 = repo_url, $2 = target_dir_in_chroot, $3 = branch (optional)
 git_clone_chroot() {
     local repo_url="$1"
@@ -142,7 +155,7 @@ git_clone_chroot() {
     if [ -n "$3" ]; then
         branch_arg="--branch $3"
     fi
-    _log_info "Cloning $repo_url into $target_dir inside chroot..."
+    _log_info "Cloning $repo_url into $target_dir..."
     git clone --depth 1 $branch_arg "$repo_url" "$target_dir" || _log_error "Git clone failed for $repo_url."
 }
 
@@ -154,7 +167,7 @@ configure_grub_defaults_chroot() {
 
     edit_file_in_chroot "$grub_default_file" "s|^GRUB_DEFAULT=.*|GRUB_DEFAULT=saved|"
     edit_file_in_chroot "$grub_default_file" "s|^GRUB_TIMEOUT=.*|GRUB_TIMEOUT=3|"
-    edit_file_in_chroot "$grub_default_file" "s|^#GRUB_SAVEDEFAULT=true|GRUB_SAVEDEFAULT=true|" || true # Use || true for optional uncomment
+    edit_file_in_chroot "$grub_default_file" "s|^#GRUB_SAVEDEFAULT=true|GRUB_SAVEDEFAULT=true|" || true
 
     if [ "$WANT_ENCRYPTION" == "yes" ]; then
         _log_info "Enabling GRUB_ENABLE_CRYPTODISK for encrypted setup."
@@ -182,7 +195,7 @@ configure_grub_theme_chroot() {
     fi
 
     IFS='|' read -r theme_repo_url theme_file_in_repo_relative <<< "$theme_info_string"
-    local theme_clone_dir="/tmp/grub_theme_clone" # Temporary clone location inside chroot's /tmp
+    local theme_clone_dir="/tmp/grub_theme_clone" # Temporary clone location
     
     _log_info "Installing GRUB theme: $theme_name from $theme_repo_url..."
 
@@ -195,7 +208,8 @@ configure_grub_theme_chroot() {
         actual_theme_source_dir_in_clone="${theme_clone_dir}/$(dirname "$theme_file_in_repo_relative")"
     fi
 
-    if [ ! -d "$actual_theme_source_dir_in_clone" ]; then # Use test -d without arch-chroot prefix here
+    # Check if the calculated source directory actually exists in the chroot
+    if [ ! -d "$actual_theme_source_dir_in_clone" ]; then
         _log_error "Calculated theme source directory '$actual_theme_source_dir_in_clone' not found in cloned repo."
     fi
 
@@ -285,13 +299,14 @@ configure_mkinitcpio_hooks_chroot() {
         hooks_string+=" $INITCPIO_RAID_HOOK"
     fi
 
-    hooks_string=$(echo "$hooks_string" | xargs) # Removed redundant sed 's/ /\ /g'
+    hooks_string=$(echo "$hooks_string" | xargs)
 
     _log_info "Setting mkinitcpio HOOKS=($hooks_string)..."
     edit_file_in_chroot "/etc/mkinitcpio.conf" "s/^HOOKS=.*/HOOKS=($hooks_string)/"
 
     _log_info "Running mkinitcpio -P to rebuild initramfs..."
-    arch-chroot /mnt mkinitpio -P || return 1 # Fixed typo mkinitpio -> mkinitcpio
+    # Fix mkinitpio typo -> mkinitcpio
+    mkinitcpio -P || return 1
     _log_info "Initramfs rebuilt."
 }
 
@@ -325,7 +340,8 @@ enable_multilib_chroot() {
     edit_file_in_chroot "/etc/pacman.conf" "s|^#Include = /etc/pacman.d/mirrorlist|Include = /etc/pacman.d/mirrorlist|"
 
     _log_info "Syncing pacman databases for Multilib."
-    arch-chroot /mnt pacman -Sy --noconfirm || return 1
+    # Note: pacman -Sy must be run AFTER uncommenting the multilib section
+    pacman -Sy --noconfirm || return 1
     _log_info "Multilib repository enabled."
 }
 
@@ -348,10 +364,10 @@ install_aur_helper_chroot() {
 
     # Define logging functions within this subshell for su -c context
     # This ensures logging works within the non-root execution
-    arch-chroot /mnt su - "$MAIN_USERNAME" -c "
+    bash -c "
         _log_info() { echo -e \"\e[32m[INFO]\e[0m \$(date +%T) \$1\"; }
         _log_warn() { echo -e \"\e[33m[WARN]\e[0m \$(date +%T) \$1\" >&2; }
-        _log_error() { echo -e \"\e[31m[ERROR]\e[0m \$(date +%T) \$1\" >&2; exit 1; } # Use exit 1 to propagate failure
+        _log_error() { echo -e \"\e[31m[ERROR]\e[0m \$(date +%T) \$1\" >&2; exit 1; }
 
         _log_info \"Building and installing $AUR_HELPER_CHOICE as user $MAIN_USERNAME...\"
         mkdir -p \"$temp_aur_dir\" || _log_error \"Failed to create temporary AUR directory.\"
@@ -361,8 +377,8 @@ install_aur_helper_chroot() {
         makepkg -si --noconfirm || _log_error \"makepkg failed for $AUR_HELPER_CHOICE.\"
         _log_info \"Cleaning up temporary AUR directory.\"
         rm -rf \"$temp_aur_dir\" || _log_warn \"Failed to remove temporary AUR build directory.\"
-    " || return 1 # Propagate failure back to main script
-    _log_info "AUR helper $AUR_HELPER_CHOICE installed."
+    " || return 1
+    log_info "AUR helper $AUR_HELPER_CHOICE installed."
 }
 
 # Installs Flatpak and adds Flathub remote.
@@ -376,7 +392,7 @@ install_flatpak_chroot() {
     install_packages_chroot "$FLATPAK_PACKAGE" || return 1
 
     _log_info "Adding Flathub remote..."
-    arch-chroot /mnt flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || return 1
+    flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || return 1
     _log_info "Flatpak installed and Flathub remote added."
 }
 
@@ -399,7 +415,7 @@ install_custom_packages_chroot() {
         _log_info "Installing custom AUR packages: '$CUSTOM_AUR_PACKAGES' using $AUR_HELPER_CHOICE..."
         
         # Define logging functions within this subshell for su -c context
-        arch-chroot /mnt su - "$MAIN_USERNAME" -c "
+        bash -c "
             _log_info() { echo -e \"\e[32m[INFO]\e[0m \$(date +%T) \$1\"; }
             _log_warn() { echo -e \"\e[33m[WARN]\e[0m \$(date +%T) \$1\" >&2; }
             _log_error() { echo -e \"\e[31m[ERROR]\e[0m \$(date +%T) \$1\" >&2; exit 1; }
@@ -428,7 +444,7 @@ deploy_dotfiles_chroot() {
 
     # Run commands as the new user, using a new login shell to ensure correct environment
     # Define logging functions within this subshell for su -c context
-    arch-chroot /mnt su - "$MAIN_USERNAME" -c "
+    bash -c "
         _log_info() { echo -e \"\e[32m[INFO]\e[0m \$(date +%T) \$1\"; }
         _log_warn() { echo -e \"\e[33m[WARN]\e[0m \$(date +%T) \$1\" >&2; }
         _log_error() { echo -e \"\e[31m[ERROR]\e[0m \$(date +%T) \$1\" >&2; exit 1; }
