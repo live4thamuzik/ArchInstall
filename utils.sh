@@ -379,19 +379,21 @@ edit_file_in_chroot() {
     local file_path="$1"
     local sed_expr="$2"
     log_info "Editing $file_path inside chroot with sed: '$sed_expr'"
+    
+    # Create a backup before editing
+    arch-chroot /mnt cp "$file_path" "${file_path}.bak" || log_warn "Failed to create backup of $file_path."
+
     arch-chroot /mnt sed -i "$sed_expr" "$file_path" || error_exit "Failed to edit $file_path inside chroot."
     log_info "File $file_path modified."
 }
 
 # Enables a systemd service inside the chroot.
-# Args: $1 = service_name (e.g., "NetworkManager.service", "gdm")
 enable_systemd_service_chroot() {
     local service_name="$1"
     log_info "Enabling systemd service $service_name inside chroot..."
     arch-chroot /mnt systemctl enable "$service_name" || error_exit "Failed to enable service $service_name inside chroot."
     log_info "Service $service_name enabled."
 }
-
 
 # --- Security / Credential Handling ---
 
