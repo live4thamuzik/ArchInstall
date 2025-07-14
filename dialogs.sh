@@ -286,13 +286,43 @@ gather_installation_details() {
     log_info "Configuring system timezone."
     local selected_region=""
     select_option "Select your primary geographical region:" TIMEZONE_REGIONS selected_region || error_exit "Timezone region selection failed."
-    local available_timezones=($(get_timezones_in_region "$selected_region"))
-    if [ ${#available_timezones[@]} -eq 0 ]; then
-        log_warn "No specific timezones found for region '$selected_region'. Using default."
-        TIMEZONE="$TIMEZONE_DEFAULT"
-    else
-        select_option "Select your city/timezone:" available_timezones TIMEZONE || error_exit "Timezone selection failed."
-    fi
+
+    local proposed_timezone_examples=""
+    case "$selected_region" in
+        "America") proposed_timezone_examples="e.g., America/New_York, America/Chicago, America/Los_Angeles";;
+        "Europe")  proposed_timezone_examples="e.g., Europe/London, Europe/Berlin, Europe/Paris";;
+        "Asia")    proposed_timezone_examples="e.g., Asia/Tokyo, Asia/Shanghai, Asia/Kolkata";;
+        "Australia") proposed_timezone_examples="e.g., Australia/Sydney, Australia/Perth";;
+        # Add more examples for other regions if desired
+        *) proposed_timezone_examples="e.g., $selected_region/CityName";;
+    esac
+
+    local chosen_timezone_input=""
+    while true; do
+        read -rp "Enter specific city/timezone (e.g., ${selected_region}/CityName, $proposed_timezone_examples): " chosen_timezone_input
+        chosen_timezone_input=$(trim_string "$chosen_timezone_input")
+
+        if [ -f "/usr/share/zoneinfo/$chosen_timezone_input" ]; then
+            TIMEZONE="$chosen_timezone_input"
+            break
+        else
+            log_warn "Timezone '$chosen_timezone_input' not found or is invalid. Please try again."
+            # Offer to list all timezones if user struggles
+            local list_all_timezones=""
+            prompt_yes_no "Do you want to see a list of ALL timezones in '$selected_region'?" list_all_timezones
+            if [ "$list_all_timezones" == "yes" ]; then
+                log_info "Listing all timezones in '$selected_region':"
+                local all_timezones_in_region=($(get_timezones_in_region "$selected_region"))
+                if [ ${#all_timezones_in_region[@]} -gt 0 ]; then
+                    printf '%s\n' "${all_timezones_in_region[@]}" # Print each on new line
+                else
+                    log_warn "No timezones found for this region, this should not happen. Please check /usr/share/zoneinfo."
+                fi
+                log_info "Please copy the exact timezone name from the list and re-enter above."
+            fi
+        fi
+    done
+    log_info "System timezone set to: $TIMEZONE"
 
     # Localization (Locale & Keymap).
     log_info "Setting system locale."
