@@ -14,43 +14,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/disk_strategies.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/chroot_config.sh"
 
 
-# --- Configuration Loading Logic ---
-# Variable to store the path of the config file to load
-LOAD_CONFIG_FILE="" # Initialized to empty
-
-# 1. Check for command-line argument for config file
-if [ -n "${1:-}" ]; then # Check if $1 is even provided
-    if [ -f "$1" ]; then # Check if it's a valid, existing file
-        LOAD_CONFIG_FILE="$1"
-        log_info "Command-line argument specified config: $LOAD_CONFIG_FILE"
-    else
-        log_warn "Command-line argument '$1' is not a valid file. Ignoring."
-        # CRITICAL FIX: Reset LOAD_CONFIG_FILE to empty so prompt_load_config is called next.
-        LOAD_CONFIG_FILE=""
-    fi
-fi
-
-# 2. If no config path determined from CLI, prompt the user to load a saved config
-if [ -z "$LOAD_CONFIG_FILE" ]; then # This correctly checks if it's empty after CLI check
-    LOAD_CONFIG_FILE=$(prompt_load_config)
-    # prompt_load_config will return an empty string if user chooses not to load.
-fi
-
-# 3. Attempt to load the configuration file if a path was identified
-if [ -n "$LOAD_CONFIG_FILE" ]; then # This is the main guard for 'source'
-    log_header "Loading Configuration from '$LOAD_CONFIG_FILE'"
-    # The 'source' command must succeed for the script to continue.
-    source "$LOAD_CONFIG_FILE" || error_exit "Failed to load configuration from '$LOAD_CONFIG_FILE'."
-    log_success "Configuration loaded from '$LOAD_CONFIG_FILE'."
-    CONFIG_LOADED="yes"
-else
-    # If LOAD_CONFIG_FILE is empty (because prompt_load_config returned empty or CLI arg was invalid/ignored)
-    log_info "No configuration file selected for loading. Proceeding with manual configuration."
-    CONFIG_LOADED="no"
-fi
-# --- End Configuration Loading Logic ---
-
-
 # --- Main Installation Function ---
 main() {
     log_header "ARCHL4TM: Tasteful Arch Linux Installation"
@@ -61,25 +24,10 @@ main() {
     install_reflector_prereqs_live || error_exit "Live ISO prerequisites failed."
     configure_mirrors_live "$REFLECTOR_COUNTRY_CODE" || error_exit "Mirror configuration failed."
 
-    # Stage 1: Gather User Input or Confirm Loaded Choices
+    # Stage 1: Gather User Input (Always interactive now, no config loading)
     log_header "Stage 1: Gathering Installation Details"
-    if [ "$CONFIG_LOADED" == "yes" ]; then
-        log_info "Configuration loaded. Displaying summary for review and collecting passwords."
-        # If config is loaded, we skip most prompts but still need passwords
-        if [ "$WANT_ENCRYPTION" == "yes" ]; then
-            secure_password_input "Enter LUKS encryption passphrase (for loaded config): " LUKS_PASSPHRASE
-        fi
-        secure_password_input "Enter root password (for loaded config): " ROOT_PASSWORD
-        secure_password_input "Enter password for $MAIN_USERNAME (for loaded config): " MAIN_USER_PASSWORD
-        
-        # Display the full summary AFTER passwords are collected
-        display_summary_and_confirm || error_exit "Installation cancelled by user."
-
-    else
-        # No config loaded, run full interactive prompts
-        gather_installation_details || error_exit "Installation details gathering failed."
-        display_summary_and_confirm || error_exit "Installation cancelled by user."
-    fi
+    gather_installation_details || error_exit "Installation details gathering failed."
+    display_summary_and_confirm || error_exit "Installation cancelled by user."
 
     # Stage 2: Disk Partitioning and Formatting
     log_header "Stage 2: Disk Partitioning and Formatting"
