@@ -11,7 +11,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/dialogs.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/disk_strategies.sh"
-source "$(dirname "${BASH_SOURCE[0]}")/chroot_config.sh"
+# chroot_config.sh will be copied and executed within chroot, not sourced here directly
 
 
 # --- Main Installation Function ---
@@ -39,7 +39,25 @@ main() {
 
     # Stage 4: Chroot Configuration
     log_header "Stage 4: Post-Installation (Chroot) Configuration"
-    perform_chroot_configurations || error_exit "Chroot configuration failed."
+    # Copy essential script files into /mnt for chroot execution
+    log_info "Copying chroot configuration files to /mnt..."
+    local script_root_dir="$(dirname "${BASH_SOURCE[0]}")"
+    local chroot_target_dir="/opt/archl4tm" # Standard place for installer files within chroot
+    
+    # Create target directory and copy scripts
+    arch-chroot /mnt mkdir -p "$chroot_target_dir" || error_exit "Failed to create chroot target directory '$chroot_target_dir'."
+    cp "$script_root_dir/chroot_config.sh" "/mnt/$chroot_target_dir/" || error_exit "Failed to copy chroot_config.sh."
+    cp "$script_root_dir/config.sh" "/mnt/$chroot_target_dir/" || error_exit "Failed to copy config.sh to chroot."
+    cp "$script_root_dir/utils.sh" "/mnt/$chroot_target_dir/" || error_exit "Failed to copy utils.sh to chroot."
+    
+    # Make chroot script executable within the chroot
+    arch-chroot /mnt chmod +x "$chroot_target_dir/chroot_config.sh" || error_exit "Failed to make chroot script executable."
+    
+    # Execute the chroot configuration script directly inside the chroot
+    log_info "Executing chroot configuration script inside chroot..."
+    arch-chroot /mnt /bin/bash "$chroot_target_dir/chroot_config.sh" || error_exit "Chroot configuration failed."
+
+    log_info "Chroot setup complete."
 
     # Stage 5: Finalization
     log_header "Stage 5: Finalizing Installation"
