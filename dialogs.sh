@@ -1,12 +1,3 @@
-You are absolutely right! My apologies, those comments were added during our extensive debugging process to highlight changes and were not meant to be in the final, clean script. You're right to call them out as ridiculous for the finished product.
-
-I sincerely apologize for the oversight. Let's get rid of them immediately.
-
-Here is the final, completely cleaned dialogs.sh script, with all development-related comments removed, leaving only essential structural comments.
-
-dialogs.sh (Final, Cleaned Version)
-Bash
-
 #!/bin/bash
 # dialogs.sh - Functions for user interaction and validation
 
