@@ -135,62 +135,6 @@ configure_wifi_live_dialog() {
     fi
 }
 
-# Prompts the user to load a configuration file.
-# Returns: The path to the config file to load, or empty string if none.
-prompt_load_config() {
-    local config_to_load=""
-    
-    local script_dir="$(dirname "${BASH_SOURCE[0]}")"
-    local available_configs=()
-    while IFS= read -r -d $'\0' f; do
-        local filename=$(basename "$f")
-        if [[ "$filename" == *.sh ]] && \
-           [[ "$filename" != "install_arch.sh" ]] && \
-           [[ "$filename" != "config.sh" ]] && \
-           [[ "$filename" != "utils.sh" ]] && \
-           [[ "$filename" != "dialogs.sh" ]] && \
-           [[ "$filename" != "disk_strategies.sh" ]] && \
-           [[ "$filename" != "chroot_config.sh" ]]; then
-            available_configs+=("$filename")
-        fi
-    done < <(find "$script_dir" -maxdepth 1 -type f -name "*.sh" -print0)
-
-    # Add a "None (configure manually)" option if there are saved configs
-    if [ ${#available_configs[@]} -gt 0 ]; then
-        available_configs+=("None (configure manually)")
-        log_info "Found existing configuration files:"
-        local config_choice_result=""
-        select_option "Select a configuration file to load (or choose 'None' to configure manually):" available_configs config_choice_result
-
-        if [ "$config_choice_result" == "None (configure manually)" ] || [ -z "$config_choice_result" ]; then
-            log_info "Proceeding with manual configuration."
-            # Fall through to manual path prompt or return empty
-        else
-            echo "$script_dir/$config_choice_result"
-            return 0 # Return the selected path
-        fi
-    else
-        log_info "No saved configuration files found in the current directory."
-    fi
-
-    # Now, prompt for a specific path if no file was loaded from the list (or if list was empty)
-    local load_manual_path_choice=""
-    prompt_yes_no "Do you want to load a configuration file from a specific path?" load_manual_path_choice
-    if [ "$load_manual_path_choice" == "yes" ]; then
-        read -rp "Enter the full path to the configuration file: " config_path_input
-        config_path_input=$(trim_string "$config_path_input")
-        if [ -f "$config_path_input" ]; then
-            echo "$config_path_input"
-            return 0 # Return the manually entered path
-        else
-            log_warn "File not found: $config_path_input. Will proceed with manual configuration."
-        fi
-    fi
-
-    echo "" # Return an empty string if no valid config file was selected or provided
-    return 0
-}
-
 
 # --- Core User Input Gathering Function ---
 gather_installation_details() {
