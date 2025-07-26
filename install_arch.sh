@@ -11,7 +11,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/dialogs.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/disk_strategies.sh"
-# chroot_config.sh will be copied and executed within chroot, not sourced here directly
+source "$(dirname "${BASH_SOURCE[0]}")/chroot_config.sh"
 
 
 # --- Main Installation Function ---
@@ -52,7 +52,9 @@ main() {
     
     # Make chroot script executable within the chroot
     arch-chroot /mnt chmod +x "$chroot_target_dir/chroot_config.sh" || error_exit "Failed to make chroot script executable."
-    
+    arch-chroot /mnt chmod +x "$chroot_target_dir/config.sh" || error_exit "Failed to make chroot config executable."
+    arch-chroot /mnt chmod +x "$chroot_target_dir/utils.sh" || error_exit "Failed to make chroot utils executable."
+
     # Execute the chroot configuration script directly inside the chroot
     log_info "Executing chroot configuration script inside chroot..."
     arch-chroot /mnt /bin/bash "$chroot_target_dir/chroot_config.sh" || error_exit "Chroot configuration failed."
@@ -71,20 +73,24 @@ main() {
 install_base_system_target() {
     log_info "Installing base system packages into /mnt..."
     
-    local packages_to_install=()
+    local packages_to_install=() # Initialize an array to hold all packages
 
+    # Add essential base packages
     packages_to_install+=(${BASE_PACKAGES[essential]})
 
+    # Add kernel packages based on user choice
     if [ "$KERNEL_TYPE" == "linux" ]; then
-        packages_to_install+=("linux" "linux-firmware" "linux-headers")
+        packages_to_install+=("linux" "linux-firmware" "linux-headers") # Explicitly list individual packages
     elif [ "$KERNEL_TYPE" == "linux-lts" ]; then
         packages_to_install+=("linux-lts" "linux-lts-headers")
     fi
     
+    # Add bootloader, network, and general system utilities
     packages_to_install+=(${BASE_PACKAGES[bootloader_grub]})
     packages_to_install+=(${BASE_PACKAGES[network]})
     packages_to_install+=(${BASE_PACKAGES[system_utils]})
 
+    # Install LVM/RAID tools if chosen (needed for mkinitcpio hooks later)
     if [ "$WANT_LVM" == "yes" ]; then
         packages_to_install+=(${BASE_PACKAGES[lvm]})
     fi
@@ -92,11 +98,13 @@ install_base_system_target() {
         packages_to_install+=(${BASE_PACKAGES[raid]})
     fi
     
+    # Add Filesystem utilities based on user choice
     if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ]; then
         packages_to_install+=(${BASE_PACKAGES[fs_btrfs]})
     elif [ "$ROOT_FILESYSTEM_TYPE" == "xfs" ]; then
         packages_to_install+=(${BASE_PACKAGES[fs_xfs]})
     fi
+    # Only add home FS tools if home partition is desired AND FS is not ext4 (ext4 tools are typically in base)
     if [ "$WANT_HOME_PARTITION" == "yes" ]; then
         if [ "$HOME_FILESYSTEM_TYPE" == "btrfs" ]; then
             packages_to_install+=(${BASE_PACKAGES[fs_btrfs]})
@@ -105,9 +113,11 @@ install_base_system_target() {
         fi
     fi
     
+    # Now, call run_pacstrap_base_install with the fully constructed array, safely quoted
+    # "${packages_to_install[@]}" ensures each element is passed as a separate argument.
     run_pacstrap_base_install "${packages_to_install[@]}" || error_exit "Base system installation failed."
 
-    generate_fstab
+    generate_fstab # Call the fstab generation after base install, before chroot.
 
     log_info "Base system installation complete on target."
 }
