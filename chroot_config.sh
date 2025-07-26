@@ -1,5 +1,18 @@
 #!/bin/bash
 # chroot_config.sh - Functions for post-base-install (chroot) configurations
+# This script is designed to be copied into the /mnt environment and executed by arch-chroot.
+
+# Strict mode for this script
+set -euo pipefail
+
+# Source its own copy of config.sh and utils.sh from its copied location
+SOURCE_DIR_IN_CHROOT="/archl4tm" # Path where install_arch.sh copies these scripts
+source "$SOURCE_DIR_IN_CHROOT/config.sh"
+source "$SOURCE_DIR_IN_CHROOT/utils.sh"
+
+# Note: Variables like INSTALL_DISK, ROOT_PASSWORD, etc. are now populated from the environment passed by install_arch.sh
+# Associative arrays like PARTITION_UUIDS are also exported (-A).
+# So, they will be directly available in this script's scope.
 
 # Re-define basic logging functions to ensure they are available within this script's context.
 # These will override the log_* from utils.sh that might be sourced, but are safer for this context
@@ -29,11 +42,9 @@ main_chroot_config() {
 
     _log_info "Setting hostname and /etc/hosts..."
     echo "$SYSTEM_HOSTNAME" > /etc/hostname || _log_error "Failed to set hostname."
-    cat <<EOT > /etc/hosts
-127.0.0.1 localhost
-::1       localhost
-127.0.1.1 $SYSTEM_HOSTNAME.localdomain $SYSTEM_HOSTNAME
-EOT
+    echo "127.0.0.1 localhost" > /etc/hosts || _log_error "Failed to write to /etc/hosts."
+    echo "::1       localhost" >> /etc/hosts || _log_error "Failed to append to /etc/hosts."
+    echo "127.0.1.1 $SYSTEM_HOSTNAME.localdomain $SYSTEM_HOSTNAME" >> /etc/hosts || _log_error "Failed to append to /etc/hosts."
     _log_info "/etc/hosts configured."
 
     _log_info "Setting root password..."
@@ -50,7 +61,7 @@ EOT
     fi
 
     # --- Phase 2: Bootloader & Initramfs ---
-    _log_info "Configuring bootloader, GRUB defaults, theme, and mkinitcpio hooks."
+    _log_info "Configuring bootloader, GRUB defaults, theme, and mkinitpio hooks."
     configure_bootloader_chroot || _log_error "Bootloader installation failed."
 
     configure_grub_defaults_chroot || _log_error "GRUB default configuration failed."
@@ -123,12 +134,17 @@ configure_bootloader_chroot() {
     case "$BOOTLOADER_TYPE" in
         grub)
             _log_info "Installing GRUB for $BOOT_MODE..."
-            if [ "$BOOT_MODE" == "uefi" ]; then
-                grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB || _log_error "GRUB UEFI installation failed."
+            # grub-install and grub-mkconfig will be run inside this single-command chroot.
+            if [ "$BOOTLOADER_TYPE" == "grub" ]; then
+                if [ "$BOOT_MODE" == "uefi" ]; then
+                    grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB || _log_error "GRUB UEFI installation failed."
+                else
+                    grub-install "$INSTALL_DISK" || _log_error "GRUB BIOS installation failed."
+                fi
+                # grub-mkconfig is called by main_chroot_config after all GRUB settings are done.
             else
-                grub-install "$INSTALL_DISK" || _log_error "GRUB BIOS installation failed."
+                _log_warn "GRUB installation skipped because BOOTLOADER_TYPE is not grub."
             fi
-            # grub-mkconfig is called by main_chroot_config after all GRUB settings are done.
             ;;
         systemd-boot)
             _log_info "Installing systemd-boot..."
@@ -209,7 +225,7 @@ configure_grub_theme_chroot() {
     fi
 
     local final_grub_theme_install_dir="/boot/grub/themes/$theme_name"
-    local final_theme_txt_path="${final_grub_theme_install_dir}/$(basename "$theme_file_in_repo_relative")"
+    local final_theme_txt_path="${final_grub_theme_install_dir}/$(basename "$theme_file_in_repo_relative")" # Path for GRUB_THEME=
 
     _log_info "Copying theme files from '$actual_theme_source_dir_in_clone' to '$final_grub_theme_install_dir'..."
     mkdir -p "$final_grub_theme_install_dir" || _log_error "Failed to create theme directory $final_grub_theme_install_dir."
@@ -371,7 +387,7 @@ install_aur_helper_chroot() {
         _log_info \"Cleaning up temporary AUR directory.\"
         rm -rf \"$temp_aur_dir\" || _log_warn \"Failed to remove temporary AUR build directory.\"
     " || return 1
-    _log_info "AUR helper $AUR_HELPER_CHOICE installed."
+    log_info "AUR helper $AUR_HELPER_CHOICE installed."
 }
 
 # Installs Flatpak and adds Flathub remote.
@@ -392,20 +408,20 @@ install_flatpak_chroot() {
 # Installs custom packages from official repos and AUR.
 install_custom_packages_chroot() {
     if [ "$INSTALL_CUSTOM_PACKAGES" == "yes" ] && [ -n "$CUSTOM_PACKAGES" ]; then
-        _log_info "Installing custom official packages: '$CUSTOM_PACKAGES'..."
+        log_info "Installing custom official packages: '$CUSTOM_PACKAGES'..."
         install_packages_chroot "$CUSTOM_PACKAGES" || return 1
     else
-        _log_info "No custom official packages requested. Skipping."
+        log_info "No custom official packages requested. Skipping."
     fi
 
     if [ "$INSTALL_CUSTOM_AUR_PACKAGES" == "yes" ] && [ -n "$CUSTOM_AUR_PACKAGES" ]; then
         if [ "$WANT_AUR_HELPER" == "no" ]; then
-            _log_warn "Custom AUR packages requested, but no AUR helper selected. Skipping AUR package installation."
+            log_warn "Custom AUR packages requested, but no AUR helper selected. Skipping AUR package installation."
             return 0
         fi
         
         local aur_install_cmd="${AUR_HELPER_CHOICE} -S --noconfirm --needed"
-        _log_info "Installing custom AUR packages: '$CUSTOM_AUR_PACKAGES' using $AUR_HELPER_CHOICE..."
+        log_info "Installing custom AUR packages: '$CUSTOM_AUR_PACKAGES' using $AUR_HELPER_CHOICE..."
         
         # Define logging functions within this subshell for su -c context
         bash -c "
