@@ -39,16 +39,19 @@ main() {
 
     # Stage 4: Chroot Configuration
     log_header "Stage 4: Post-Installation (Chroot) Configuration"
-    # Copy essential script files into /mnt for chroot execution
     log_info "Copying chroot configuration files to /mnt..."
     local script_root_dir="$(dirname "${BASH_SOURCE[0]}")"
-    local chroot_target_dir="/opt/archl4tm" # Standard place for installer files within chroot
+    
+    # --- FIX: Change chroot_target_dir to avoid potential /opt issues ---
+    local chroot_target_dir="/archl4tm" # Standard place for installer files within chroot (changed from /opt/archl4tm)
     local install_script_path_in_chroot="/mnt/$chroot_target_dir" # Full path on the /mnt filesystem
+    # --- End FIX ---
+
+    set -x # <<< START DEBUG TRACE FOR COPY OPS >>>
 
     arch-chroot /mnt mkdir -p "$chroot_target_dir" || error_exit "Failed to create chroot target directory '$chroot_target_dir'."
     
     # Copy chroot_config.sh
-    # We add detailed checks here to debug the copy issue, as previously discussed.
     if [ ! -f "$script_root_dir/chroot_config.sh" ]; then
         error_exit "Source file not found: $script_root_dir/chroot_config.sh. Cannot proceed."
     fi
@@ -77,6 +80,8 @@ main() {
     if [ ! -f "$install_script_path_in_chroot/utils.sh" ]; then
         error_exit "Destination file NOT FOUND after copying: $install_script_path_in_chroot/utils.sh."
     fi
+
+    set +x # <<< END DEBUG TRACE FOR COPY OPS >>>
     
     # Make chroot script executable within the chroot
     log_info "Setting permissions for chroot scripts..."
