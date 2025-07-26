@@ -63,7 +63,7 @@ do_auto_simple_partitioning() {
     fi
 
     # Root Partition and Optional Home Partition
-    local root_size_mib=$(echo "${LV_LAYOUT[lv_root]}" | sed 's/G/*1024/' | bc)
+    local root_size_mib=$(echo "${LV_LAYOUT[lv_root]}" | sed 's/G/*1024/' | bc) # Use ROOT_LV_SIZE from LV_LAYOUT
 
     if [ "$WANT_HOME_PARTITION" == "yes" ]; then
         log_info "Creating Root partition (${LV_LAYOUT[lv_root]}) and separate Home partition (rest of disk)..."
@@ -146,7 +146,7 @@ do_auto_luks_lvm_partitioning() {
 
     # 4. Main LUKS Container Partition (takes rest of disk)
     log_info "Creating LUKS container partition (rest of disk)..."
-    parted -s "$INSTALL_DISK" mkpart primary linux-lvm "${current_start_mib}MiB" "100%" || error_exit "Failed to create LUKS container partition."
+    parted -s "$INSTALL_DISK" mkpart primary ext4 "${current_start_mib}MiB" "100%" || error_exit "Failed to create LUKS container partition." # FIX: Changed linux-lvm to ext4
     partprobe "$INSTALL_DISK"
     part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
     parted -s "$INSTALL_DISK" set "$part_num" lvm on || log_warn "Failed to set LVM flag on LUKS container partition."
@@ -192,7 +192,7 @@ do_auto_raid_luks_lvm_partitioning() {
         current_start_mib=$((current_start_mib + BOOT_PART_SIZE_MIB))
         
         # 3. Main LUKS Container Partition (takes rest of disk, will be part of RAID1 for LUKS)
-        parted -s "$disk" mkpart primary linux-raid "${current_start_mib}MiB" "100%" || error_exit "Failed to create LUKS container partition on $disk."
+        parted -s "$disk" mkpart primary ext4 "${current_start_mib}MiB" "100%" || error_exit "Failed to create LUKS container partition on $disk." # FIX: Changed linux-raid to ext4
         parted -s "$disk" set "$luks_part_num" raid on || log_warn "Failed to set RAID flag on LUKS partition on $disk."
         partprobe "$disk"
     done
