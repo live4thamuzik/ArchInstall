@@ -43,14 +43,43 @@ main() {
     log_info "Copying chroot configuration files to /mnt..."
     local script_root_dir="$(dirname "${BASH_SOURCE[0]}")"
     local chroot_target_dir="/opt/archl4tm" # Standard place for installer files within chroot
-    
-    # Create target directory and copy scripts
+    local install_script_path_in_chroot="/mnt/$chroot_target_dir" # Full path on the /mnt filesystem
+
     arch-chroot /mnt mkdir -p "$chroot_target_dir" || error_exit "Failed to create chroot target directory '$chroot_target_dir'."
-    cp "$script_root_dir/chroot_config.sh" "/mnt/$chroot_target_dir/" || error_exit "Failed to copy chroot_config.sh."
-    cp "$script_root_dir/config.sh" "/mnt/$chroot_target_dir/" || error_exit "Failed to copy config.sh to chroot."
-    cp "$script_root_dir/utils.sh" "/mnt/$chroot_target_dir/" || error_exit "Failed to copy utils.sh to chroot."
+    
+    # Copy chroot_config.sh
+    # We add detailed checks here to debug the copy issue, as previously discussed.
+    if [ ! -f "$script_root_dir/chroot_config.sh" ]; then
+        error_exit "Source file not found: $script_root_dir/chroot_config.sh. Cannot proceed."
+    fi
+    log_info "Attempting to copy $script_root_dir/chroot_config.sh..."
+    cp "$script_root_dir/chroot_config.sh" "$install_script_path_in_chroot/" || error_exit "Failed to copy chroot_config.sh."
+    if [ ! -f "$install_script_path_in_chroot/chroot_config.sh" ]; then
+        error_exit "Destination file NOT FOUND after copying: $install_script_path_in_chroot/chroot_config.sh."
+    fi
+
+    # Copy config.sh
+    if [ ! -f "$script_root_dir/config.sh" ]; then
+        error_exit "Source file not found: $script_root_dir/config.sh. Cannot proceed."
+    fi
+    log_info "Attempting to copy $script_root_dir/config.sh..."
+    cp "$script_root_dir/config.sh" "$install_script_path_in_chroot/" || error_exit "Failed to copy config.sh to chroot."
+    if [ ! -f "$install_script_path_in_chroot/config.sh" ]; then
+        error_exit "Destination file NOT FOUND after copying: $install_script_path_in_chroot/config.sh."
+    fi
+
+    # Copy utils.sh
+    if [ ! -f "$script_root_dir/utils.sh" ]; then
+        error_exit "Source file not found: $script_root_dir/utils.sh. Cannot proceed."
+    fi
+    log_info "Attempting to copy $script_root_dir/utils.sh..."
+    cp "$script_root_dir/utils.sh" "$install_script_path_in_chroot/" || error_exit "Failed to copy utils.sh to chroot."
+    if [ ! -f "$install_script_path_in_chroot/utils.sh" ]; then
+        error_exit "Destination file NOT FOUND after copying: $install_script_path_in_chroot/utils.sh."
+    fi
     
     # Make chroot script executable within the chroot
+    log_info "Setting permissions for chroot scripts..."
     arch-chroot /mnt chmod +x "$chroot_target_dir/chroot_config.sh" || error_exit "Failed to make chroot script executable."
     arch-chroot /mnt chmod +x "$chroot_target_dir/config.sh" || error_exit "Failed to make chroot config executable."
     arch-chroot /mnt chmod +x "$chroot_target_dir/utils.sh" || error_exit "Failed to make chroot utils executable."
