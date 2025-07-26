@@ -79,30 +79,30 @@ install_base_system_target() {
         kernel_packages="linux-lts linux-lts-headers"
     fi
     
-    run_pacstrap "$base_packages_list $kernel_packages"
+    run_pacstrap_base_install "$base_packages_list $kernel_packages"
 
     # Install LVM/RAID tools if chosen, as they are needed for mkinitcpio hooks later
     if [ "$WANT_LVM" == "yes" ]; then
-        run_pacstrap ${BASE_PACKAGES[lvm]} || error_exit "Failed to install LVM tools."
+        run_pacstrap_base_install ${BASE_PACKAGES[lvm]} || error_exit "Failed to install LVM tools."
     fi
     if [ "$WANT_RAID" == "yes" ]; then
-        run_pacstrap ${BASE_PACKAGES[raid]} || error_exit "Failed to install RAID tools."
+        run_pacstrap_base_install ${BASE_PACKAGES[raid]} || error_exit "Failed to install RAID tools."
     fi
     
     # Filesystem utilities based on user choice
     if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ]; then
-        run_pacstrap ${BASE_PACKAGES[fs_btrfs]} || error_exit "Failed to install Btrfs tools."
+        run_pacstrap_base_install ${BASE_PACKAGES[fs_btrfs]} || error_exit "Failed to install Btrfs tools."
     elif [ "$ROOT_FILESYSTEM_TYPE" == "xfs" ]; then
-        run_pacstrap ${BASE_PACKAGES[fs_xfs]} || error_exit "Failed to install XFS tools."
+        run_pacstrap_base_install ${BASE_PACKAGES[fs_xfs]} || error_exit "Failed to install XFS tools."
     fi
     if [ "$HOME_FILESYSTEM_TYPE" == "btrfs" ]; then
-        run_pacstrap ${BASE_PACKAGES[fs_btrfs]} || error_exit "Failed to install Btrfs tools for home."
+        run_pacstrap_base_install ${BASE_PACKAGES[fs_btrfs]} || error_exit "Failed to install Btrfs tools for home."
     elif [ "$HOME_FILESYSTEM_TYPE" == "xfs" ]; then
-        run_pacstrap ${BASE_PACKAGES[fs_xfs]} || error_exit "Failed to install XFS tools for home."
+        run_pacstrap_base_install ${BASE_PACKAGES[fs_xfs]} || error_exit "Failed to install XFS tools for home."
     fi
     
     # Common network and system utilities
-    run_pacstrap ${BASE_PACKAGES[network]} ${BASE_PACKAGES[system_utils]}
+    run_pacstrap_base_install ${BASE_PACKAGES[network]} ${BASE_PACKAGES[system_utils]}
     
     generate_fstab # Call the fstab generation after base install, before chroot.
 
