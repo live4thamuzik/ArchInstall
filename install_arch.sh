@@ -11,8 +11,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/dialogs.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/disk_strategies.sh"
-source "$(dirname "${BASH_SOURCE[0]}")/chroot_config.sh"
-
 
 # --- Main Installation Function ---
 main() {
@@ -91,12 +89,10 @@ main() {
     export INSTALL_CUSTOM_PACKAGES CUSTOM_PACKAGES INSTALL_CUSTOM_AUR_PACKAGES CUSTOM_AUR_PACKAGES
     export WANT_GRUB_THEME GRUB_THEME_CHOICE WANT_NUMLOCK_ON_BOOT WANT_DOTFILES_DEPLOYMENT
     export DOTFILES_REPO_URL DOTFILES_BRANCH EFI_PART_SIZE_MIB BOOT_PART_SIZE_MIB ROOT_FILESYSTEM_TYPE HOME_FILESYSTEM_TYPE
-    export -f get_device_type
-    
-    local temp_chroot_vars_file="/mnt/$chroot_target_dir/chroot_vars.sh"
+    export WANT_SWAP WANT_HOME_PARTITION
 
+    # Export associative arrays (Bash 4.x+ feature)
     export -A PARTITION_UUIDS LUKS_DEVICES_MAP LVM_DEVICES_MAP
-    export VG_NAME
 
     arch-chroot /mnt /bin/bash "$chroot_target_dir/chroot_config.sh" || error_exit "Chroot configuration failed."
 
@@ -150,7 +146,7 @@ install_base_system_target() {
     
     run_pacstrap_base_install "${packages_to_install[@]}" || error_exit "Base system installation failed."
 
-    generate_fstab # Call the fstab generation after base install, before chroot.
+    generate_fstab
 
     log_info "Base system installation complete on target."
 }
