@@ -322,8 +322,8 @@ run_pacstrap_base_install() {
         error_exit "Unsupported KERNEL_TYPE: $KERNEL_TYPE."
     fi
 
-    pacstrap -K --noconfirm --needed /mnt ${BASE_PACKAGES[essential]} $kernel_packages \
-        ${BASE_PACKAGES[bootloader_grub]} ${BASE_PACKAGES[network]} ${BASE_PACKAGES[system_utils]} || \
+    pacstrap -K /mnt ${BASE_PACKAGES[essential]} $kernel_packages \
+        ${BASE_PACKAGES[bootloader_grub]} ${BASE_PACKAGES[network]} ${BASE_PACKAGES[system_utils]} --noconfirm --needed || \
         error_exit "Pacstrap failed to install base system."
 
     log_info "Pacstrap base system complete."
