@@ -228,7 +228,7 @@ declare -A AUR_HELPERS=(
 FLATPAK_PACKAGE="flatpak"
 
 # Custom packages specified by the user to be installed from Arch repos
-CUSTOM_PACKAGES=""
+CUSTOM_PACKAGES="neovim"
 
 # Custom AUR packages specified by the user to be installed via AUR helper
 CUSTOM_AUR_PACKAGES=""
