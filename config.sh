@@ -245,18 +245,18 @@ declare -A GRUB_THEME_SOURCES=(
 
 
 # --- mkinitcpio Hooks (Dynamic components based on features) ---\
-INITCPIO_BASE_HOOKS="base udev autodetect modconf block keyboard keymap filesystems fsck"
-INITCPIO_LUKS_HOOK="encrypt"
-INITCPIO_LVM_HOOK="lvm2"
-INITCPIO_RAID_HOOK="mdadm_udev"
-INITCPIO_NVME_HOOK="nvme"
-
-
-# --- GRUB Kernel Command Line Parameters ---
-GRUB_CMDLINE_LUKS_BASE="cryptdevice=UUID=<LUKS_CONTAINER_UUID>:cryptroot"
-GRUB_CMDLINE_LVM_ON_LUKS="rd.lvm.vg=$VG_NAME"
-
-
+INITCPIO_BASE_HOOKS="base udev autodetect modconf block keyboard keymap filesystems fsck"\
+INITCPIO_LUKS_HOOK="encrypt"\
+INITCPIO_LVM_HOOK="lvm2"\
+INITCPIO_RAID_HOOK="mdadm_udev"\
+INITCPIO_NVME_HOOK="nvme"\
+\
+\
+# --- GRUB Kernel Command Line Parameters ---\
+GRUB_CMDLINE_LUKS_BASE="cryptdevice=UUID=<LUKS_CONTAINER_UUID>:cryptroot"\
+GRUB_CMDLINE_LVM_ON_LUKS="rd.lvm.vg=$VG_NAME"\
+\
+\
 # --- Default Logical Volume Layout (for LVM schemes) ---\
 declare -A LV_LAYOUT=(\
     [lv_root]="100G"\
