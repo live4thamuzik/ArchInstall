@@ -1,30 +1,34 @@
 #!/bin/bash
-# dialogs.sh - Functions for user interaction and validation
+# dialogs.sh - Functions for user interaction and validation (Bash 3.x Compatible)
 
+# Select a single item from a list of options.
+# Args: $1 = prompt_message, $2 = array_name_containing_options (string name), $3 = result_variable_name (string name)
 select_option() {
     local prompt_msg="$1"
     local array_name="$2"
-    local -n result_var="$3"
+    local result_var_name="$3" # This is now the string name, not a nameref
 
-    local -n options_array_ref="$array_name"
+    # Get array content using indirect expansion (Bash 3.x compatible)
+    local options_array_content=()
+    eval "options_array_content=( \"\${${array_name}[@]}\" )"
 
-    if [ ${#options_array_ref[@]} -eq 0 ]; then
+    if [ ${#options_array_content[@]} -eq 0 ]; then
         error_exit "No options provided for selection: $prompt_msg"
     fi
 
     log_info "$prompt_msg"
     local i=1
-    local opt_keys=()
+    local opt_keys=() # Will hold the options to display and map back to result
 
-    if declare -p "$array_name" 2>/dev/null | grep -q 'declare -A'; then
-        for key in "${!options_array_ref[@]}"; do
-            opt_keys+=("$key")
-        done
-    else
-        for element in "${options_array_ref[@]}"; do
-            opt_keys+=("$element")
-        done
-    fi
+    # For Bash 3.x, we don't have declare -A, so all our "maps" are simulated with naming convention
+    # and passed as string names to select_option (e.g., DESKTOP_ENVIRONMENTS).
+    # If the array name passed is for a package list (which are now indexed arrays),
+    # we just use its content.
+    # We're simplifying this to assume all arrays passed here are indexed arrays of strings.
+
+    for opt in "${options_array_content[@]}"; do
+        opt_keys+=("$opt") # Directly populate opt_keys from options_array_content
+    done
 
     for opt in "${opt_keys[@]}"; do
         echo "  $((i++)). $opt"
@@ -34,8 +38,9 @@ select_option() {
     while true; do
         read -rp "Enter choice number (1-${#opt_keys[@]}): " choice
         if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#opt_keys[@]} )); then
-            result_var="${opt_keys[$((choice-1))]}"
-            log_info "Selected: ${result_var}"
+            # Assign result using indirect expansion (Bash 3.x compatible)
+            eval "${result_var_name}=\"${opt_keys[$((choice-1))]}\""
+            log_info "Selected: ${!result_var_name}"
             return 0
         else
             log_warn "Invalid choice."
@@ -43,15 +48,17 @@ select_option() {
     done
 }
 
+# Prompt for yes/no question.
+# Args: $1 = prompt_message, $2 = result_variable_name (string name)
 prompt_yes_no() {
     local prompt_msg="$1"
-    local -n result_var="$2"
+    local result_var_name="$2" # This is now the string name
 
     while true; do
-        read -rp "$prompt_msg (y/n): " yn_choice
-        case "$yn_choice" in
-            [Yy]* ) result_var="yes"; return 0;;
-            [Nn]* ) result_var="no"; return 0;;
+        read -rp "$prompt_msg (y/n): " temp_yn_choice # Read into a temporary var
+        case "$temp_yn_choice" in
+            [Yy]* ) eval "${result_var_name}=\"yes\""; return 0;; # Assign using eval
+            [Nn]* ) eval "${result_var_name}=\"no\""; return 0;;  # Assign using eval
             * ) log_warn "Please answer yes or no.";;
         esac
     done
@@ -59,6 +66,11 @@ prompt_yes_no() {
 
 get_available_disks() {
     local disks=()
+    # Replace read -r -d '' with read -r and process newlines from find
+    # find ... -print0 is Bash 4.4+
+    # For Bash 3.x, use find ... -print | while read -r line
+    # Or, rely on lsblk output directly
+    # Original get_available_disks using awk prints with newlines, so read -r is fine.
     while IFS= read -r line; do
         disks+=("/dev/$line")
     done < <(lsblk -dno NAME,TYPE | awk '$2=="disk"{print $1}' | grep -v 'loop' | grep -v 'ram')
@@ -77,12 +89,15 @@ get_timezones_in_region() {
         return 0
     fi
 
-    while IFS= read -r -d '' tz_file_path; do
+    # For Bash 3.x, replace find -print0 | while IFS= read -r -d ''
+    # Use find -print | while IFS= read -r (standard for newlines)
+    while IFS= read -r tz_file_path; do
+        # Remove the base path and ensure correct formatting
         local full_tz_name="${tz_file_path#"$zoneinfo_base_path/"}"
         if [[ "$full_tz_name" != posix/* ]] && [[ "$full_tz_name" != Etc/* ]] && [[ "$full_tz_name" != zone.tab ]]; then
             timezones+=("$full_tz_name")
         fi
-    done < <(find -L "$region_path" -type f -print0)
+    done < <(find -L "$region_path" -type f -print) # Changed -print0 to -print for Bash 3.x
 
     IFS=$'\n' timezones=($(sort <<<"${timezones[*]}"))
     unset IFS
@@ -99,7 +114,7 @@ configure_wifi_live_dialog() {
     fi
 
     local wifi_device=""
-    if [[ $(echo "$wifi_devices" | wc -w) -gt 1 ]]; then
+    if [ $(echo "$wifi_devices" | wc -w) -gt 1 ]; then
         local wifi_dev_options=($(echo "$wifi_devices"))
         select_option "Select Wi-Fi device:" wifi_dev_options wifi_device || return 1
     else
@@ -121,7 +136,7 @@ configure_wifi_live_dialog() {
     select_option "Select Wi-Fi network (SSID):" network_options selected_ssid || return 1
 
     local password=""
-    read -rsp "Enter password for '$selected_ssid' (leave blank if none): " password
+    read -rp "Enter password for '$selected_ssid' (leave blank if none): " password
     echo
 
     log_info "Connecting to '$selected_ssid'..."
@@ -146,7 +161,10 @@ prompt_load_config() {
     
     local script_dir="$(dirname "${BASH_SOURCE[0]}")"
     local available_configs=()
-    while IFS= read -r -d $'\0' f; do
+    # For Bash 3.x, find -print0 | while IFS= read -r -d '' is problematic.
+    # Use find -print | while IFS= read -r, but it's not robust for filenames with newlines.
+    # For config files, newlines are highly unlikely in names.
+    while IFS= read -r f; do
         local filename=$(basename "$f")
         if [[ "$filename" == *.sh ]] && \
            [[ "$filename" != "install_arch.sh" ]] && \
@@ -157,7 +175,7 @@ prompt_load_config() {
            [[ "$filename" != "chroot_config.sh" ]]; then
             available_configs+=("$filename")
         fi
-    done < <(find "$script_dir" -maxdepth 1 -type f -name "*.sh" -print0)
+    done < <(find "$script_dir" -maxdepth 1 -type f -name "*.sh" -print) # Changed -print0 to -print
 
     if [ ${#available_configs[@]} -gt 0 ]; then
         available_configs+=("None (configure manually)")
@@ -203,7 +221,7 @@ gather_installation_details() {
 
     # Auto-detect boot mode, allow override for BIOS.
     log_info "Detecting system boot mode."
-    if [[ -d "/sys/firmware/efi" ]]; then
+    if [ -d "/sys/firmware/efi" ]; then # Bash 3.x does not support [[ -d /sys/firmware/efi ]] for directory check
         BOOT_MODE="uefi"
         log_info "Detected UEFI boot mode."
 
@@ -213,7 +231,7 @@ gather_installation_details() {
             if [ "$uefi_bitness" == "32" ]; then
                 error_exit "Detected 32-bit UEFI firmware. Arch Linux x86_64 requires 64-bit UEFI or BIOS boot mode. Please switch to BIOS/Legacy boot in your firmware settings or perform a manual installation."
             fi
-            log_info "Detected ${uefi_bitness}-bit UEFI firmware."
+            log_info "Detected ${uefi_bitness}-bit UEFI firmware." # Bash 3.x doesn't support ${var^^}
         else
             log_warn "Could not determine UEFI firmware bitness (missing $fw_platform_size_file)."
             log_warn "Proceeding assuming 64-bit UEFI, but manual verification is recommended if issues arise."
