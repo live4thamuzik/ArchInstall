@@ -228,7 +228,7 @@ declare -A AUR_HELPERS=(
 FLATPAK_PACKAGE="flatpak"
 
 # Custom packages specified by the user to be installed from Arch repos
-CUSTOM_PACKAGES="neovim"
+CUSTOM_PACKAGES=""
 
 # Custom AUR packages specified by the user to be installed via AUR helper
 CUSTOM_AUR_PACKAGES=""
@@ -244,7 +244,7 @@ declare -A GRUB_THEME_SOURCES=(
 )
 
 
-# --- mkinitcpio Hooks (Dynamic components based on features) ---
+# --- mkinitcpio Hooks (Dynamic components based on features) ---\
 INITCPIO_BASE_HOOKS="base udev autodetect modconf block keyboard keymap filesystems fsck"
 INITCPIO_LUKS_HOOK="encrypt"
 INITCPIO_LVM_HOOK="lvm2"
@@ -257,19 +257,19 @@ GRUB_CMDLINE_LUKS_BASE="cryptdevice=UUID=<LUKS_CONTAINER_UUID>:cryptroot"
 GRUB_CMDLINE_LVM_ON_LUKS="rd.lvm.vg=$VG_NAME"
 
 
-# --- Default Logical Volume Layout (for LVM schemes) ---
-declare -A LV_LAYOUT=(
-    [lv_root]="100G"
-    [lv_swap]="4G"
-    [lv_home]="100%FREE"
-)
-declare -A DEFAULT_LV_MOUNTPOINTS=(
-    [lv_root]="/mnt"
-    [lv_swap]="[SWAP]"
-    [lv_home]="/mnt/home"
-)
-declare -A DEFAULT_LV_FSTYPES=(
-    [lv_root]="$ROOT_FILESYSTEM_TYPE"
-    [lv_swap]="swap"
-    [lv_home]="$HOME_FILESYSTEM_TYPE"
+# --- Default Logical Volume Layout (for LVM schemes) ---\
+declare -A LV_LAYOUT=(\
+    [lv_root]="100G"\
+    [lv_swap]="4G"\
+    [lv_home]="100%FREE"\
+)\
+declare -A DEFAULT_LV_MOUNTPOINTS=(\
+    [lv_root]="/mnt"\
+    [lv_swap]="[SWAP]"\
+    [lv_home]="/mnt/home"\
+)\
+declare -A DEFAULT_LV_FSTYPES=(\
+    [lv_root]="$ROOT_FILESYSTEM_TYPE"\
+    [lv_swap]="swap"\
+    [lv_home]="$HOME_FILESYSTEM_TYPE"\
 )
