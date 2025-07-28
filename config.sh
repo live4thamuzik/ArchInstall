@@ -1,5 +1,5 @@
 #!/bin/bash
-# config.sh - All configurable options and package lists for Archl4tm
+# config.sh - All configurable options and package lists for Archl4tm (Bash 3.x Compatible)
 
 # --- Installation Parameters (Populated by dialogs.sh or defaults) ---
 INSTALL_DISK=""               # Primary disk selected by user (e.g., /dev/sda). Blank initially.
@@ -70,29 +70,54 @@ DOTFILES_BRANCH="main"        # Branch to clone (e.g., "main", "hyprland-config"
 
 # --- Internal State Variables (Populated by functions, not user choices) ---
 # These are filled by functions (e.g., capture_id_for_config, encrypt_device)
-declare -A PARTITION_UUIDS    # Stores UUIDs/PARTUUIDs of created partitions/LVs (e.g., [root_uuid], [efi_partuuid])
-declare -A LUKS_DEVICES_MAP   # Maps LUKS name to its opened device path (e.g., [cryptroot]=/dev/mapper/cryptroot)
-declare -A LVM_DEVICES_MAP    # Maps VG_LV name to its path (e.g., [vg0_lvroot]=/dev/mapper/vg0-lvroot)
-VG_NAME="volgroup0"                 # Default LVM Volume Group name (from your old script)
+# Associative arrays replaced by indexed arrays for Bash 3.x compatibility
+# Keys become part of variable names.
+declare -a PARTITION_UUIDS_ROOT_UUID # ROOT partition UUID
+declare -a PARTITION_UUIDS_EFI_UUID  # EFI partition UUID
+declare -a PARTITION_UUIDS_EFI_PARTUUID # EFI partition PARTUUID
+declare -a PARTITION_UUIDS_BOOT_UUID # /boot partition UUID
+declare -a PARTITION_UUIDS_SWAP_UUID # Swap partition UUID
+declare -a PARTITION_UUIDS_HOME_UUID # /home partition UUID
+declare -a PARTITION_UUIDS_LUKS_CONTAINER_UUID # LUKS container UUID
+declare -a PARTITION_UUIDS_LV_ROOT_UUID # LV root UUID
+declare -a PARTITION_UUIDS_LV_SWAP_UUID # LV swap UUID
+declare -a PARTITION_UUIDS_LV_HOME_UUID # LV home UUID
+
+declare -a LUKS_DEVICES_MAP_CRYPTROOT # luks name to opened device path (e.g., [cryptroot]=/dev/mapper/cryptroot)
+# We will use explicit variable names for LUKS devices, not map.
+LUKS_CRYPTROOT_DEV="" # /dev/mapper/cryptroot
+
+# LVM devices map is complex to handle without associative array.
+# Will use direct variable assignment or temporary array.
+# For example, VG0_LV_ROOT_PATH="/dev/mapper/vg0-lv_root"
+# LVM_DEVICES_MAP is effectively replaced by specific LV path variables.
+
+VG_NAME="volgroup0" # Default LVM Volume Group name (from your old script)
+LV_ROOT_PATH=""     # Populated dynamically
+LV_SWAP_PATH=""     # Populated dynamically
+LV_HOME_PATH=""     # Populated dynamically
 
 
 # --- Options for Dialogs (Arrays for select_option) ---
 
 # Maps partition scheme choices to their corresponding implementation functions.
-declare -A PARTITION_STRATEGY_FUNCTIONS=(
-    ["auto_simple"]="do_auto_simple_partitioning"
-    ["auto_luks_lvm"]="do_auto_luks_lvm_partitioning"
-    ["auto_raid_luks_lvm"]="do_auto_raid_luks_lvm_partitioning"
-    ["manual"]="do_manual_partitioning_guided"
+# Replace with indexed array and case statement in dispatcher.
+declare -a PARTITION_STRATEGY_FUNCTIONS=(
+    "auto_simple" "do_auto_simple_partitioning"
+    "auto_luks_lvm" "do_auto_luks_lvm_partitioning"
+    "auto_raid_luks_lvm" "do_auto_raid_luks_lvm_partitioning"
+    "manual" "do_manual_partitioning_guided"
 )
+
 
 # Partitioning strategies that the script supports
 declare -a PARTITION_STRATEGIES_OPTIONS=(
     "auto_simple"
     "auto_luks_lvm"
-    # "auto_raid_luks_lvm" is conditionally added in dialogs.sh based on disk count
     "manual"
 )
+# Note: "auto_raid_luks_lvm" will be conditionally added in dialogs.sh based on disk count
+
 
 # RAID levels (for mdadm software RAID)
 declare -a RAID_LEVEL_OPTIONS=("1" "5" "6" "10")
@@ -150,7 +175,7 @@ declare -a REFLECTOR_COMMON_COUNTRIES=(
 declare -a BOOTLOADER_TYPES_OPTIONS=("grub" "systemd-boot")
 
 # AUR Helper options
-declare -a AUR_HELPERS_OPTIONS=("yay" "paru")
+declare -a AUR_HELPERS_OPTIONS=("yay" "paru") # These are now just options, no packages directly in this array
 
 # GRUB Theme options (themes would need to be physically present in a 'themes' directory)
 declare -a GRUB_THEME_OPTIONS=(
@@ -162,67 +187,64 @@ declare -a GRUB_THEME_OPTIONS=(
 )
 
 
-# --- Package Lists (Associative Arrays mapping choice to packages) ---
+# --- Package Lists (Indexed Arrays mapping choice to packages) ---
+# Each element is a string of space-separated packages.
+# To install packages for a DE like Gnome, use: ${DESKTOP_ENVIRONMENTS_GNOME_PACKAGES}
 
-# Base packages for pacstrap
-declare -A BASE_PACKAGES=(
-    [essential]="base" # Kernel, firmware, headers are handled by KERNEL_TYPE
-    [bootloader_grub]="grub efibootmgr os-prober"
-    [bootloader_systemdboot]="systemd-boot"
-    [network]="networkmanager dhcpcd"
-    [system_utils]="sudo man-db man-pages vim nano bash-completion git"
-    # CPU Microcode packages (installed conditionally based on detection)
-    [firmware_intel]="intel-ucode"
-    [firmware_amd]="amd-ucode"
-    # LVM and RAID tools (needed if chosen in partitioning scheme)
-    [lvm]="lvm2"
-    [raid]="mdadm"
-    # Basic filesystem utilities (e2fsprogs for ext4 is common, others for optional FS types)
-    [fs_ext4]="e2fsprogs"
-    [fs_btrfs]="btrfs-progs"
-    [fs_xfs]="xfsprogs"
-)
+declare -a BASE_PACKAGES_ESSENTIAL=("base")
+declare -a BASE_PACKAGES_BOOTLOADER_GRUB=("grub" "efibootmgr" "os-prober")
+declare -a BASE_PACKAGES_BOOTLOADER_SYSTEMDBOOT=("systemd-boot")
+declare -a BASE_PACKAGES_NETWORK=("networkmanager" "dhcpcd")
+declare -a BASE_PACKAGES_SYSTEM_UTILS=("sudo" "man-db" "man-pages" "vim" "nano" "bash-completion" "git")
+# CPU Microcode packages (installed conditionally based on detection)
+declare -a BASE_PACKAGES_FIRMWARE_INTEL=("intel-ucode")
+declare -a BASE_PACKAGES_FIRMWARE_AMD=("amd-ucode")
+# LVM and RAID tools (needed if chosen in partitioning scheme)
+declare -a BASE_PACKAGES_LVM=("lvm2")
+declare -a BASE_PACKAGES_RAID=("mdadm")
+# Basic filesystem utilities
+declare -a BASE_PACKAGES_FS_EXT4=("e2fsprogs")
+declare -a BASE_PACKAGES_FS_BTRFS=("btrfs-progs")
+declare -a BASE_PACKAGES_FS_XFS=("xfsprogs")
 
-# Desktop Environments and their core packages
-declare -A DESKTOP_ENVIRONMENTS=(
-    [gnome]="gnome gnome-extra gnome-tweaks gnome-shell-extensions gnome-browser-connector firefox"
-    [kde]="plasma-desktop kde-applications dolphin firefox lxappearance"
-    [hyprland]="hyprland hyprland-protocols xdg-desktop-portal-hyprland" # Core Hyprland & Wayland integration
-    [hyprland]+=" hypridle hyprlock hyprpicker hyprshade hyprsunset cliphist grim grimblast-git slurp swappy swww swaylockeffects-git swayosd-git wlogout" # Hyprland specific utilities
-    [hyprland]+=" kitty waybar wofi mako dunst" # Essential UI/Interaction (Terminal, Bar, Launcher, Notifications)
-    [hyprland]+=" pipewire wireplumber pipewire-alsa pipewire-audio pipewire-jack pipewire-pulse pipewire-v4l2 gst-plugin-pipewire pamixer pavucontrol" # Audio Stack
-    [hyprland]+=" network-manager-applet" # Network Tray Icon
-    [hyprland]+=" brightnessctl udiskie" # Hardware control, automount
-    [hyprland]+=" polkit-gnome" # PolicyKit authentication agent
-    [hyprland]+=" qt5-wayland qt6-wayland kvantum kvantum-qt5 qt5ct qt6ct" # Qt Wayland integration & theming
-    [hyprland]+=" nwg-look nwg-displays bluez bluez-utils blueman" # Theming tools & Bluetooth stack
-    [hyprland]+=" ttf-firacode-nerd ttf-font-awesome ttf-meslo-nerd noto-fonts-emoji ttf-anonymouspro-nerd ttf-daddytime-mono-nerd" # All fonts added/corrected
-    [hyprland]+=" dolphin rofi-wayland satty imagemagick" # Common GUI file manager & other utilities
-    [hyprland]+=" wlr-protocols wlr-randr" # Explicit Wayland protocol/randr utilities
-    [hyprland]+=" xdg-desktop-portal-gtk libnotify" # XDG Desktop Portal for GTK, General notification library
-    [none]="" # For server or minimal install
-)
 
-# Display Managers for various DEs (installed conditionally)
-declare -A DISPLAY_MANAGERS=(
-    [gdm]="gdm"
-    [sddm]="sddm"
-    [none]="" # No display manager for server/WM-only
+# Desktop Environments and their core packages (indexed arrays of package names)
+declare -a DESKTOP_ENVIRONMENTS_GNOME_PACKAGES=("gnome" "gnome-extra" "gnome-tweaks" "gnome-shell-extensions" "gnome-browser-connector" "firefox")
+declare -a DESKTOP_ENVIRONMENTS_KDE_PACKAGES=("plasma-desktop" "kde-applications" "dolphin" "firefox" "lxappearance")
+# Hyprland specific list - Bash 3.x compatible long string
+declare -a DESKTOP_ENVIRONMENTS_HYPRLAND_PACKAGES=(
+    "hyprland" "hyprland-protocols" "xdg-desktop-portal-hyprland"
+    "hypridle" "hyprlock" "hyprpicker" "hyprshade" "hyprsunset" "cliphist" "grim" "grimblast-git" "slurp" "swappy" "swww" "swaylockeffects-git" "swayosd-git" "wlogout"
+    "kitty" "waybar" "wofi" "mako" "dunst"
+    "pipewire" "wireplumber" "pipewire-alsa" "pipewire-audio" "pipewire-jack" "pipewire-pulse" "pipewire-v4l2" "gst-plugin-pipewire" "pamixer" "pavucontrol"
+    "network-manager-applet"
+    "brightnessctl" "udiskie"
+    "polkit-gnome"
+    "qt5-wayland" "qt6-wayland" "kvantum" "kvantum-qt5" "qt5ct" "qt6ct"
+    "nwg-look" "nwg-displays" "bluez" "bluez-utils" "blueman"
+    "ttf-firacode-nerd" "ttf-font-awesome" "ttf-meslo-nerd" "noto-fonts-emoji" "ttf-anonymouspro-nerd" "ttf-daddytime-mono-nerd"
+    "dolphin" "rofi-wayland" "satty" "imagemagick"
+    "wlr-protocols" "wlr-randr"
+    "xdg-desktop-portal-gtk" "libnotify"
 )
+declare -a DESKTOP_ENVIRONMENTS_NONE_PACKAGES=("") # Empty list for no DE
+
+# Display Managers (installed conditionally)
+declare -a DISPLAY_MANAGERS_GDM_PACKAGES=("gdm")
+declare -a DISPLAY_MANAGERS_SDDM_PACKAGES=("sddm")
+declare -a DISPLAY_MANAGERS_NONE_PACKAGES=("")
+
 
 # GPU Drivers (packages installed conditionally based on auto-detection)
-declare -A GPU_DRIVERS=(
-    [amd]="xf86-video-amdgpu mesa vulkan-radeon"
-    [nvidia]="nvidia nvidia-utils nvidia-settings"
-    [intel]="xf86-video-intel mesa vulkan-intel"
-    [none]="" # For headless systems or if detection fails
-)
+declare -a GPU_DRIVERS_AMD_PACKAGES=("xf86-video-amdgpu" "mesa" "vulkan-radeon")
+declare -a GPU_DRIVERS_NVIDIA_PACKAGES=("nvidia" "nvidia-utils" "nvidia-settings")
+declare -a GPU_DRIVERS_INTEL_PACKAGES=("xf86-video-intel" "mesa" "vulkan-intel")
+declare -a GPU_DRIVERS_NONE_PACKAGES=("")
 
-# AUR Helper packages
-declare -A AUR_HELPERS=(
-    [yay]="yay"
-    [paru]="paru"
-)
+
+# AUR Helper packages (AUR_HELPERS_OPTIONS lists choices, these are actual package names)
+declare -a AUR_HELPERS_YAY_PACKAGES=("yay")
+declare -a AUR_HELPERS_PARU_PACKAGES=("paru")
 
 # Flatpak package
 FLATPAK_PACKAGE="flatpak"
@@ -235,41 +257,37 @@ CUSTOM_AUR_PACKAGES=""
 
 # GRUB Theme specific directories/files (used by chroot_config.sh for installation)
 # Format: "git_url|path/to/theme.txt_relative_to_repo_root"
-declare -A GRUB_THEME_SOURCES=(
-    [poly-dark]="https://github.com/shvchk/poly-dark.git|theme.txt"
-    [CyberEXS]="https://github.com/HenriqueLopes42/themeGrub.CyberEXS.git|theme.txt"
-    [Cyberpunk]="https://gitlab.com/anoopmsivadas/Cyberpunk-GRUB-Theme.git|Cyberpunk/theme.txt"
-    [HyperFluent]="https://github.com/Coopydood/HyperFluent-GRUB-Theme.git|arch/theme.txt"
-    [Default]="" # No source for default theme
-)
+# Replace with indexed array, and parse string.
+declare -a GRUB_THEME_SOURCES_POLY_DARK=("https://github.com/shvchk/poly-dark.git" "theme.txt")
+declare -a GRUB_THEME_SOURCES_CYBEREXS=("https://github.com/HenriqueLopes42/themeGrub.CyberEXS.git" "theme.txt")
+declare -a GRUB_THEME_SOURCES_CYBERPUNK=("https://gitlab.com/anoopmsivadas/Cyberpunk-GRUB-Theme.git" "Cyberpunk/theme.txt")
+declare -a GRUB_THEME_SOURCES_HYPERFLUENT=("https://github.com/Coopydood/HyperFluent-GRUB-Theme.git" "arch/theme.txt")
+declare -a GRUB_THEME_SOURCES_DEFAULT=("")
 
 
-# --- mkinitcpio Hooks (Dynamic components based on features) ---\
-INITCPIO_BASE_HOOKS="base udev autodetect modconf block keyboard keymap filesystems fsck"\
-INITCPIO_LUKS_HOOK="encrypt"\
-INITCPIO_LVM_HOOK="lvm2"\
-INITCPIO_RAID_HOOK="mdadm_udev"\
-INITCPIO_NVME_HOOK="nvme"\
-\
-\
-# --- GRUB Kernel Command Line Parameters ---\
-GRUB_CMDLINE_LUKS_BASE="cryptdevice=UUID=<LUKS_CONTAINER_UUID>:cryptroot"\
-GRUB_CMDLINE_LVM_ON_LUKS="rd.lvm.vg=$VG_NAME"\
-\
-\
-# --- Default Logical Volume Layout (for LVM schemes) ---\
-declare -A LV_LAYOUT=(\
-    [lv_root]="100G"\
-    [lv_swap]="4G"\
-    [lv_home]="100%FREE"\
-)\
-declare -A DEFAULT_LV_MOUNTPOINTS=(\
-    [lv_root]="/mnt"\
-    [lv_swap]="[SWAP]"\
-    [lv_home]="/mnt/home"\
-)\
-declare -A DEFAULT_LV_FSTYPES=(\
-    [lv_root]="$ROOT_FILESYSTEM_TYPE"\
-    [lv_swap]="swap"\
-    [lv_home]="$HOME_FILESYSTEM_TYPE"\
-)
+# --- mkinitcpio Hooks (Dynamic components based on features) ---
+INITCPIO_BASE_HOOKS="base udev autodetect modconf block keyboard keymap filesystems fsck"
+INITCPIO_LUKS_HOOK="encrypt"
+INITCPIO_LVM_HOOK="lvm2"
+INITCPIO_RAID_HOOK="mdadm_udev"
+INITCPIO_NVME_HOOK="nvme"
+
+
+# --- GRUB Kernel Command Line Parameters ---
+GRUB_CMDLINE_LUKS_BASE="cryptdevice=UUID=<LUKS_CONTAINER_UUID>:cryptroot"
+GRUB_CMDLINE_LVM_ON_LUKS="rd.lvm.vg=$VG_NAME"
+
+
+# --- Default Logical Volume Layout (for LVM schemes) ---
+# Replace with indexed array and explicit variable names
+declare -a LV_LAYOUT_LV_ROOT="100G"
+declare -a LV_LAYOUT_LV_SWAP="4G"
+declare -a LV_LAYOUT_LV_HOME="100%FREE"
+
+declare -a DEFAULT_LV_MOUNTPOINTS_LV_ROOT="/mnt"
+declare -a DEFAULT_LV_MOUNTPOINTS_LV_SWAP="[SWAP]"
+declare -a DEFAULT_LV_MOUNTPOINTS_LV_HOME="/mnt/home"
+
+declare -a DEFAULT_LV_FSTYPES_LV_ROOT="$ROOT_FILESYSTEM_TYPE"
+declare -a DEFAULT_LV_FSTYPES_LV_SWAP="swap"
+declare -a DEFAULT_LV_FSTYPES_LV_HOME="$HOME_FILESYSTEM_TYPE"
