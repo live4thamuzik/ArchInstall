@@ -37,7 +37,7 @@ log_success() {
 # --- System Checks ---
 check_prerequisites() {
     log_info "Checking prerequisites..."
-    if [[ "$EUID" -ne 0 ]]; then
+    if [ "$EUID" -ne 0 ]; then
         error_exit "This script must be run as root."
     fi
 
@@ -53,15 +53,13 @@ check_prerequisites() {
 # Returns "nvme" or "sd" or "unknown" based on device path.
 get_device_type() {
     local dev_path="$1"
-    # Use POSIX shell compatible regex without extended features of [[ ]] or pattern matching
-    # This might be tricky in older Bash, but [[ =~ ]] is typically Bash 3.0+.
-    # Let's assume Bash 3.x has enough regex.
+    # Bash 3.x compatible regex
     if echo "$dev_path" | grep -q "^/dev/nvme[0-9]\+n[0-9]\+$"; then
         echo "nvme"
     elif echo "$dev_path" | grep -q "^/dev/sd[a-z]\+$"; then
         echo "sd"
     else
-        error_exit "Unsupported disk type for device path construction: $dev_path."
+        echo "unknown"
     fi
 }
 
@@ -146,7 +144,7 @@ safe_umount() {
 # Captures UUID or PARTUUID of a device and stores it in global variables (no associative array for Bash 3.x).
 # Args: $1 = key_prefix (e.g., "root", "efi"), $2 = dev_path, $3 = id_type ("UUID" or "PARTUUID")
 capture_id_for_config() {
-    local key_prefix="$1" # e.g., "root", "efi", "luks_container", "lv_root"
+    local key_prefix="$1" # e.g., "efi", "root", "luks_container", "lv_root"
     local dev_path="$2"   # e.g., /dev/sda1, /dev/mapper/cryptroot
     local id_type="$3"    # "UUID" or "PARTUUID"
 
@@ -159,17 +157,7 @@ capture_id_for_config() {
     if [ -z "$id_value" ]; then
         error_exit "Could not retrieve ${id_type} for ${dev_path}. Check device formatting or type."
     fi
-    # Use variable indirection for Bash 3.x (no declare -A)
-    # e.g., PARTITION_UUIDS_ROOT_UUID="value", PARTITION_UUIDS_EFI_PARTUUID="value"
-    eval "PARTITION_UUIDS_${key_prefix^^}_${id_type^^}=\"$id_value\"" # ${key_prefix^^} makes uppercase (Bash 4.x+)
-    # Bash 3.x uppercase: local upper_key_prefix=$(echo "$key_prefix" | tr '[:lower:]' '[:upper:]')
-    # Bash 3.x uppercase: local upper_id_type=$(echo "$id_type" | tr '[:lower:]' '[:upper:]')
-    # eval "PARTITION_UUIDS_${upper_key_prefix}_${upper_id_type}=\"$id_value\""
-
-    # Simplified for now, relying on external script to directly set these (less ideal)
-    # The current Bash 3.x compatible strategy replaces PARTITION_UUIDS associative array
-    # with discrete scalar variables like PARTITION_UUIDS_ROOT_UUID.
-    # So, capture_id_for_config needs to directly set these.
+    # Use explicit variable names for Bash 3.x (no declare -A PARTITION_UUIDS)
     case "${key_prefix}_${id_type}" in
         efi_UUID) PARTITION_UUIDS_EFI_UUID="$id_value";;
         efi_PARTUUID) PARTITION_UUIDS_EFI_PARTUUID="$id_value";;
@@ -185,7 +173,6 @@ capture_id_for_config() {
     esac
     log_info "Captured ${id_type} for ${key_prefix}: ${id_value}"
 }
-
 
 # Gets the UUID of an opened LUKS device.
 # Args: $1 = luks_dev_mapper_path (e.g., /dev/mapper/cryptroot)
@@ -221,6 +208,7 @@ get_lvm_lv_path() {
 # Encrypts a device with LUKS.
 # Args: $1 = dev_path (e.g., /dev/sda2), $2 = luks_name (e.g., cryptroot)
 # Global: LUKS_PASSPHRASE (read from config.sh)
+# Global: LUKS_CRYPTROOT_DEV (Bash 3.x way to store opened device path)
 encrypt_device() {
     local dev_path="$1"
     local luks_name="$2"
@@ -228,8 +216,11 @@ encrypt_device() {
     echo -n "$LUKS_PASSPHRASE" | cryptsetup luksFormat --type luks2 --cipher "aes-xts-plain64" --key-size "512" --hash "sha512" "$dev_path" -d - \
         --verbose --verify-passphrase || error_exit "LUKS format failed for $dev_path."
     
-    # Store opened path
-    LUKS_CRYPTROOT_DEV="/dev/mapper/$luks_name"
+    # Open the LUKS device
+    echo -n "$LUKS_PASSPHRASE" | cryptsetup open "$dev_path" "$luks_name" -d - || error_exit "LUKS open failed for $dev_path."
+    
+    capture_id_for_config "luks_container" "$dev_path" "UUID"
+    LUKS_CRYPTROOT_DEV="/dev/mapper/$luks_name" # Store opened path in global scalar var for Bash 3.x
     log_info "$dev_path encrypted and opened as /dev/mapper/$luks_name."
 }
 
@@ -239,6 +230,7 @@ encrypt_device() {
 # Global: DEFAULT_LV_MOUNTPOINTS_LV_ROOT, DEFAULT_LV_MOUNTPOINTS_LV_SWAP, DEFAULT_LV_MOUNTPOINTS_LV_HOME (from config.sh)
 # Global: DEFAULT_LV_FSTYPES_LV_ROOT, DEFAULT_LV_FSTYPES_LV_SWAP, DEFAULT_LV_FSTYPES_LV_HOME (from config.sh)
 # Global: WANT_SWAP, WANT_HOME_PARTITION (from config.sh, user choices)
+# Global: LV_ROOT_PATH, LV_SWAP_PATH, LV_HOME_PATH (Bash 3.x way to store LV paths)
 setup_lvm() {
     local pv_dev="$1"
     local vg_name="$2"
@@ -247,7 +239,6 @@ setup_lvm() {
     pvcreate -y "$pv_dev" || error_exit "pvcreate failed for $pv_dev."
     vgcreate "$vg_name" "$pv_dev" || error_exit "vgcreate failed for $vg_name."
 
-    # Create Logical Volumes based on config.sh scalar variables
     # Root LV
     local lv_name="lv_root"
     local lv_size="${LV_LAYOUT_LV_ROOT}"
@@ -256,12 +247,13 @@ setup_lvm() {
     local lv_fs_type="${DEFAULT_LV_FSTYPES_LV_ROOT}"
 
     log_info "Creating Logical Volume $lv_name ($lv_size) in VG $vg_name..."
-    if echo "$lv_size" | grep -q '%'; then # Check for %FREE
+    # Check for Bash 3.x compatibility for percent expansion using grep
+    if echo "$lv_size" | grep -q '%'; then
         lvcreate -l "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
     else
         lvcreate -L "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
     fi
-    eval "LV_ROOT_PATH=\"$lv_path\"" # Assign to global variable
+    LV_ROOT_PATH="$lv_path" # Assign to global variable for Bash 3.x
     
     format_filesystem "$lv_path" "$lv_fs_type"
     capture_id_for_config "$lv_name" "$lv_path" "UUID"
@@ -281,7 +273,7 @@ setup_lvm() {
         else
             lvcreate -L "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
         fi
-        eval "LV_SWAP_PATH=\"$lv_path\"" # Assign to global variable
+        LV_SWAP_PATH="$lv_path" # Assign to global variable for Bash 3.x
 
         format_filesystem "$lv_path" "$lv_fs_type"
         capture_id_for_config "$lv_name" "$lv_path" "UUID"
@@ -302,7 +294,7 @@ setup_lvm() {
         else
             lvcreate -L "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
         fi
-        eval "LV_HOME_PATH=\"$lv_path\"" # Assign to global variable
+        LV_HOME_PATH="$lv_path" # Assign to global variable for Bash 3.x
 
         format_filesystem "$lv_path" "$lv_fs_type"
         capture_id_for_config "$lv_name" "$lv_path" "UUID"
@@ -453,7 +445,7 @@ secure_password_input() {
     while true; do
         read -rsp "$prompt_msg (min 8 chars): " "$result_var_name" # Direct expansion here
         echo
-        if [[ "${!result_var_name}" != "" && ${#result_var_name} -ge 8 ]]; then # Check length of expanded value
+        if [ -n "${!result_var_name}" ] && [ ${#result_var_name} -ge 8 ]; then # Check length of expanded value
             break
         else
             log_warn "Password too short or empty. Please enter at least 8 characters."
@@ -496,14 +488,28 @@ save_current_config() {
         )
 
         for var_name in "${vars_to_save[@]}"; do
-            # Check if the variable exists and is a simple variable
-            if eval "test -n \"\${$var_name+defined}\"" && ! eval "declare -a \"$var_name\" 2>/dev/null"; then # Test if var is set and not an array
-                printf '%s="%s"\n' "$var_name" "$(printf %s "${!var_name}" | sed 's/"/\\"/g')"
+            # Check if the variable exists and is a simple variable (Bash 3.x compat)
+            # Use indirect expansion for checking variable existence
+            if eval "test -n \"\${$var_name+defined}\""; then # Check if var is set
+                # Ensure it's not an array, as declare -a for arrays is different from scalars
+                # Bash 3.x doesn't have declare -p for types robustly. This check will be simplified.
+                local is_array=0
+                # Crude check for Bash 3.x - assume simple variables unless explicitly managed
+                # If we rely on specific array checks, Bash 3.x won't work well here for declare -a.
+                # For `save_current_config`, we just dump what we know are scalar and RAID_DEVICES (explicitly handled).
+                
+                # Check if it's RAID_DEVICES, which is an array
+                if [ "$var_name" == "RAID_DEVICES" ]; then
+                    is_array=1
+                fi
+
+                if [ "$is_array" -eq 0 ]; then
+                    printf '%s="%s"\n' "$var_name" "$(printf %s "${!var_name}" | sed 's/"/\\"/g')"
+                fi
             fi
         done
         
-        # Specifically save RAID_DEVICES array if it's populated
-        # Replace declare -p with explicit echo for Bash 3.x
+        # Specifically save RAID_DEVICES array if it's populated (Bash 3.x explicit array dump)
         if [ ${#RAID_DEVICES[@]} -gt 0 ]; then
             echo ""
             echo "declare -a RAID_DEVICES=("
