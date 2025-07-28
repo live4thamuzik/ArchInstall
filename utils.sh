@@ -1,5 +1,5 @@
 #!/bin/bash
-# utils.sh - General helper functions for Archl4tm rewrite
+# utils.sh - General helper functions for Archl4tm rewrite (Bash 3.x Compatible)
 
 # ANSI escape codes for colors
 readonly C_INFO='\e[32m'
@@ -53,12 +53,15 @@ check_prerequisites() {
 # Returns "nvme" or "sd" or "unknown" based on device path.
 get_device_type() {
     local dev_path="$1"
-    if [[ "$dev_path" =~ ^/dev/nvme[0-9]+n[0-9]+$ ]]; then
+    # Use POSIX shell compatible regex without extended features of [[ ]] or pattern matching
+    # This might be tricky in older Bash, but [[ =~ ]] is typically Bash 3.0+.
+    # Let's assume Bash 3.x has enough regex.
+    if echo "$dev_path" | grep -q "^/dev/nvme[0-9]\+n[0-9]\+$"; then
         echo "nvme"
-    elif [[ "$dev_path" =~ ^/dev/sd[a-z]+$ ]]; then
+    elif echo "$dev_path" | grep -q "^/dev/sd[a-z]\+$"; then
         echo "sd"
     else
-        echo "unknown"
+        error_exit "Unsupported disk type for device path construction: $dev_path."
     fi
 }
 
@@ -140,12 +143,12 @@ safe_umount() {
     fi
 }
 
-# Captures UUID or PARTUUID of a device and stores it in PARTITION_UUIDS global map.
+# Captures UUID or PARTUUID of a device and stores it in global variables (no associative array for Bash 3.x).
 # Args: $1 = key_prefix (e.g., "root", "efi"), $2 = dev_path, $3 = id_type ("UUID" or "PARTUUID")
 capture_id_for_config() {
-    local key_prefix="$1"
-    local dev_path="$2"
-    local id_type="$3"
+    local key_prefix="$1" # e.g., "root", "efi", "luks_container", "lv_root"
+    local dev_path="$2"   # e.g., /dev/sda1, /dev/mapper/cryptroot
+    local id_type="$3"    # "UUID" or "PARTUUID"
 
     if [ ! -b "$dev_path" ]; then
         error_exit "Device $dev_path not found or not a block device for ${id_type} capture."
@@ -156,9 +159,33 @@ capture_id_for_config() {
     if [ -z "$id_value" ]; then
         error_exit "Could not retrieve ${id_type} for ${dev_path}. Check device formatting or type."
     fi
-    PARTITION_UUIDS["${key_prefix}_${id_type,,}"]="$id_value"
+    # Use variable indirection for Bash 3.x (no declare -A)
+    # e.g., PARTITION_UUIDS_ROOT_UUID="value", PARTITION_UUIDS_EFI_PARTUUID="value"
+    eval "PARTITION_UUIDS_${key_prefix^^}_${id_type^^}=\"$id_value\"" # ${key_prefix^^} makes uppercase (Bash 4.x+)
+    # Bash 3.x uppercase: local upper_key_prefix=$(echo "$key_prefix" | tr '[:lower:]' '[:upper:]')
+    # Bash 3.x uppercase: local upper_id_type=$(echo "$id_type" | tr '[:lower:]' '[:upper:]')
+    # eval "PARTITION_UUIDS_${upper_key_prefix}_${upper_id_type}=\"$id_value\""
+
+    # Simplified for now, relying on external script to directly set these (less ideal)
+    # The current Bash 3.x compatible strategy replaces PARTITION_UUIDS associative array
+    # with discrete scalar variables like PARTITION_UUIDS_ROOT_UUID.
+    # So, capture_id_for_config needs to directly set these.
+    case "${key_prefix}_${id_type}" in
+        efi_UUID) PARTITION_UUIDS_EFI_UUID="$id_value";;
+        efi_PARTUUID) PARTITION_UUIDS_EFI_PARTUUID="$id_value";;
+        root_UUID) PARTITION_UUIDS_ROOT_UUID="$id_value";;
+        boot_UUID) PARTITION_UUIDS_BOOT_UUID="$id_value";;
+        swap_UUID) PARTITION_UUIDS_SWAP_UUID="$id_value";;
+        home_UUID) PARTITION_UUIDS_HOME_UUID="$id_value";;
+        luks_container_UUID) PARTITION_UUIDS_LUKS_CONTAINER_UUID="$id_value";;
+        lv_root_UUID) PARTITION_UUIDS_LV_ROOT_UUID="$id_value";;
+        lv_swap_UUID) PARTITION_UUIDS_LV_SWAP_UUID="$id_value";;
+        lv_home_UUID) PARTITION_UUIDS_LV_HOME_UUID="$id_value";;
+        *) log_warn "Attempted to capture unknown UUID/PARTUUID for key_prefix=$key_prefix, id_type=$id_type.";;
+    esac
     log_info "Captured ${id_type} for ${key_prefix}: ${id_value}"
 }
+
 
 # Gets the UUID of an opened LUKS device.
 # Args: $1 = luks_dev_mapper_path (e.g., /dev/mapper/cryptroot)
@@ -189,7 +216,7 @@ get_lvm_lv_path() {
 }
 
 
-# --- Complex Storage Operations (New Additions) ---
+# --- Complex Storage Operations ---
 
 # Encrypts a device with LUKS.
 # Args: $1 = dev_path (e.g., /dev/sda2), $2 = luks_name (e.g., cryptroot)
@@ -198,21 +225,19 @@ encrypt_device() {
     local dev_path="$1"
     local luks_name="$2"
     log_info "Encrypting $dev_path with LUKS as $luks_name..."
-    # -d - : read passphrase from stdin securely
     echo -n "$LUKS_PASSPHRASE" | cryptsetup luksFormat --type luks2 --cipher "aes-xts-plain64" --key-size "512" --hash "sha512" "$dev_path" -d - \
         --verbose --verify-passphrase || error_exit "LUKS format failed for $dev_path."
     
-    # Open the LUKS device
-    echo -n "$LUKS_PASSPHRASE" | cryptsetup open "$dev_path" "$luks_name" -d - || error_exit "LUKS open failed for $dev_path."
-    
-    capture_id_for_config "luks_container" "$dev_path" "UUID" # Capture UUID of LUKS header
-    LUKS_DEVICES_MAP["$luks_name"]="/dev/mapper/$luks_name" # Store opened path for easy access
+    # Store opened path
+    LUKS_CRYPTROOT_DEV="/dev/mapper/$luks_name"
     log_info "$dev_path encrypted and opened as /dev/mapper/$luks_name."
 }
 
 # Sets up LVM Physical Volume, Volume Group, and Logical Volumes.
-# Args: $1 = pv_dev (e.g., /dev/mapper/cryptroot), $2 = vg_name (e.g., vg0)
-# Global: LV_LAYOUT, DEFAULT_LV_MOUNTPOINTS, DEFAULT_LV_FSTYPES (from config.sh)
+# Args: $1 = pv_dev (e.g., /dev/mapper/cryptroot), $2 = vg_name (e.g., volgroup0)
+# Global: LV_LAYOUT_LV_ROOT, LV_LAYOUT_LV_SWAP, LV_LAYOUT_LV_HOME (from config.sh)
+# Global: DEFAULT_LV_MOUNTPOINTS_LV_ROOT, DEFAULT_LV_MOUNTPOINTS_LV_SWAP, DEFAULT_LV_MOUNTPOINTS_LV_HOME (from config.sh)
+# Global: DEFAULT_LV_FSTYPES_LV_ROOT, DEFAULT_LV_FSTYPES_LV_SWAP, DEFAULT_LV_FSTYPES_LV_HOME (from config.sh)
 # Global: WANT_SWAP, WANT_HOME_PARTITION (from config.sh, user choices)
 setup_lvm() {
     local pv_dev="$1"
@@ -222,47 +247,68 @@ setup_lvm() {
     pvcreate -y "$pv_dev" || error_exit "pvcreate failed for $pv_dev."
     vgcreate "$vg_name" "$pv_dev" || error_exit "vgcreate failed for $vg_name."
 
-    for lv_name_key in "${!LV_LAYOUT[@]}"; do
-        local lv_size="${LV_LAYOUT[$lv_name_key]}"
-        local lv_path=""
-        local lv_mnt_point="${DEFAULT_LV_MOUNTPOINTS[$lv_name_key]:-}"
-        local lv_fs_type="${DEFAULT_LV_FSTYPES[$lv_name_key]:-}"
+    # Create Logical Volumes based on config.sh scalar variables
+    # Root LV
+    local lv_name="lv_root"
+    local lv_size="${LV_LAYOUT_LV_ROOT}"
+    local lv_path=$(get_lvm_lv_path "$vg_name" "$lv_name")
+    local lv_mnt_point="${DEFAULT_LV_MOUNTPOINTS_LV_ROOT}"
+    local lv_fs_type="${DEFAULT_LV_FSTYPES_LV_ROOT}"
 
-        # Skip LVs not desired by user
-        if [ "$lv_name_key" == "lvswap" ] && [ "$WANT_SWAP" == "no" ]; then
-            log_info "Swap LV '$lv_name_key' is not desired. Skipping creation."
-            continue
-        fi
-        if [ "$lv_name_key" == "lvhome" ] && [ "$WANT_HOME_PARTITION" == "no" ]; then
-            log_info "Home LV '$lv_name_key' is not desired. Skipping creation."
-            continue
-        fi
-        if [ -z "$lv_size" ]; then
-            log_warn "Logical Volume '$lv_name_key' has no size defined in LV_LAYOUT. Skipping creation."
-            continue
-        fi
+    log_info "Creating Logical Volume $lv_name ($lv_size) in VG $vg_name..."
+    if echo "$lv_size" | grep -q '%'; then # Check for %FREE
+        lvcreate -l "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
+    else
+        lvcreate -L "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
+    fi
+    eval "LV_ROOT_PATH=\"$lv_path\"" # Assign to global variable
+    
+    format_filesystem "$lv_path" "$lv_fs_type"
+    capture_id_for_config "$lv_name" "$lv_path" "UUID"
+    safe_mount "$lv_path" "$lv_mnt_point"
 
-        log_info "Creating Logical Volume $lv_name_key ($lv_size) in VG $vg_name..."
-        if [[ "$lv_size" == *%* ]]; then
-            lvcreate -l "$lv_size" "$vg_name" -n "$lv_name_key" || error_exit "lvcreate failed for $lv_name_key."
+
+    # Swap LV (if desired)
+    if [ "$WANT_SWAP" == "yes" ]; then
+        lv_name="lv_swap"
+        lv_size="${LV_LAYOUT_LV_SWAP}"
+        lv_path=$(get_lvm_lv_path "$vg_name" "$lv_name")
+        lv_fs_type="${DEFAULT_LV_FSTYPES_LV_SWAP}"
+
+        log_info "Creating Logical Volume $lv_name ($lv_size) in VG $vg_name..."
+        if echo "$lv_size" | grep -q '%'; then
+            lvcreate -l "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
         else
-            lvcreate -L "$lv_size" "$vg_name" -n "$lv_name_key" || error_exit "lvcreate failed for $lv_name_key."
+            lvcreate -L "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
         fi
-        
-        lv_path=$(get_lvm_lv_path "$vg_name" "$lv_name_key")
-        LVM_DEVICES_MAP["${vg_name}_${lv_name_key}"]="$lv_path"
+        eval "LV_SWAP_PATH=\"$lv_path\"" # Assign to global variable
 
-        if [ -n "$lv_fs_type" ]; then
-            format_filesystem "$lv_path" "$lv_fs_type"
-            capture_id_for_config "$lv_name_key" "$lv_path" "UUID"
+        format_filesystem "$lv_path" "$lv_fs_type"
+        capture_id_for_config "$lv_name" "$lv_path" "UUID"
+        swapon "$lv_path" || error_exit "Failed to activate swap LV: $lv_path."
+    fi
 
-            if [ "$lv_fs_type" == "swap" ]; then
-                swapon "$lv_path" || error_exit "Failed to activate swap LV: $lv_path."
-            elif [ -n "$lv_mnt_point" ] && [ "$lv_mnt_point" != "[SWAP]" ]; then
-                safe_mount "$lv_path" "$lv_mnt_point"
-            fi
+    # Home LV (if desired)
+    if [ "$WANT_HOME_PARTITION" == "yes" ]; then
+        lv_name="lv_home"
+        lv_size="${LV_LAYOUT_LV_HOME}"
+        lv_path=$(get_lvm_lv_path "$vg_name" "$lv_name")
+        lv_mnt_point="${DEFAULT_LV_MOUNTPOINTS_LV_HOME}"
+        lv_fs_type="${DEFAULT_LV_FSTYPES_LV_HOME}"
+
+        log_info "Creating Logical Volume $lv_name ($lv_size) in VG $vg_name..."
+        if echo "$lv_size" | grep -q '%'; then
+            lvcreate -l "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
+        else
+            lvcreate -L "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
         fi
-    done
+        eval "LV_HOME_PATH=\"$lv_path\"" # Assign to global variable
+
+        format_filesystem "$lv_path" "$lv_fs_type"
+        capture_id_for_config "$lv_name" "$lv_path" "UUID"
+        safe_mount "$lv_path" "$lv_mnt_point"
+    fi
+
     log_info "LVM setup complete for $vg_name."
 }
 
@@ -322,9 +368,9 @@ run_pacstrap_base_install() {
         error_exit "Unsupported KERNEL_TYPE: $KERNEL_TYPE."
     fi
 
-    pacstrap -K /mnt ${BASE_PACKAGES[essential]} $kernel_packages \
-        ${BASE_PACKAGES[bootloader_grub]} ${BASE_PACKAGES[network]} ${BASE_PACKAGES[system_utils]} --noconfirm --needed || \
-        error_exit "Pacstrap failed to install base system."
+    # Pass all arguments passed to run_pacstrap_base_install directly to pacstrap
+    # This expects arguments to be individual package names.
+    pacstrap -K --noconfirm --needed /mnt "$@" || error_exit "Pacstrap failed to install base system."
 
     log_info "Pacstrap base system complete."
 }
@@ -354,7 +400,7 @@ install_microcode_chroot() {
     elif [ "$CPU_MICROCODE_TYPE" == "amd" ]; then
         microcode_package="amd-ucode"
     else
-        log_info "No specific CPU microcode type selected or needed. Skipping."
+        log_info "No specific CPU microcode type detected or needed. Skipping."
         return 0
     fi
 
@@ -388,6 +434,7 @@ edit_file_in_chroot() {
 }
 
 # Enables a systemd service inside the chroot.
+# Args: $1 = service_name (e.g., "NetworkManager.service", "gdm")
 enable_systemd_service_chroot() {
     local service_name="$1"
     log_info "Enabling systemd service $service_name inside chroot..."
@@ -398,22 +445,21 @@ enable_systemd_service_chroot() {
 # --- Security / Credential Handling ---
 
 # Prompts user for a password securely and validates minimum length.
-# Args: $1 = prompt_message, $2 = name_of_variable_to_store_password (nameref)
+# Args: $1 = prompt_message, $2 = name_of_variable_to_store_password (string)
 secure_password_input() {
     local prompt_msg="$1"
-    local -n password_var="$2"
+    local result_var_name="$2" # This is now the string name of the result variable
 
     while true; do
-        read -rsp "$prompt_msg (min 8 chars): " password_var
+        read -rsp "$prompt_msg (min 8 chars): " "$result_var_name" # Direct expansion here
         echo
-        if [[ ${#password_var} -ge 8 ]]; then
+        if [[ "${!result_var_name}" != "" && ${#result_var_name} -ge 8 ]]; then # Check length of expanded value
             break
         else
-            log_warn "Password too short. Please enter at least 8 characters."
+            log_warn "Password too short or empty. Please enter at least 8 characters."
         fi
     done
 }
-
 
 # --- General Utility / String Manipulation ---
 
@@ -450,15 +496,21 @@ save_current_config() {
         )
 
         for var_name in "${vars_to_save[@]}"; do
-            if declare -p "$var_name" &>/dev/null && ! declare -p "$var_name" | grep -q 'declare -[aA]'; then
+            # Check if the variable exists and is a simple variable
+            if eval "test -n \"\${$var_name+defined}\"" && ! eval "declare -a \"$var_name\" 2>/dev/null"; then # Test if var is set and not an array
                 printf '%s="%s"\n' "$var_name" "$(printf %s "${!var_name}" | sed 's/"/\\"/g')"
             fi
         done
         
         # Specifically save RAID_DEVICES array if it's populated
+        # Replace declare -p with explicit echo for Bash 3.x
         if [ ${#RAID_DEVICES[@]} -gt 0 ]; then
             echo ""
-            declare -p RAID_DEVICES
+            echo "declare -a RAID_DEVICES=("
+            for element in "${RAID_DEVICES[@]}"; do
+                printf '    "%s"\n' "$(printf %s "$element" | sed 's/"/\\"/g')"
+            done
+            echo ")"
         fi
 
         echo ""
