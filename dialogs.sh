@@ -449,7 +449,7 @@ gather_installation_details() {
     secure_password_input "Enter password for $MAIN_USERNAME: " MAIN_USER_PASSWORD
 
     # Desktop Environment and Display Manager.
-    select_option "Select Desktop Environment:" DESKTOP_ENVIRONMENTS DESKTOP_ENVIRONMENT
+    select_option "Select Desktop Environment:" DESKTOP_ENVIRONMENTS_OPTIONS DESKTOP_ENVIRONMENT
     if [ "$?" -ne 0 ]; then # Check for select_option failure
         error_exit "Desktop Environment selection failed."
     fi
