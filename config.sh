@@ -165,6 +165,14 @@ declare -a REFLECTOR_COMMON_COUNTRIES=(
     "ZA"
 )
 
+# Options for Desktop Environment Selection
+declare -a DESKTOP_ENVIRONMENTS_OPTIONS=(
+    "gnome"
+    "kde"
+    "hyprland"
+    "none"
+)
+
 # Bootloader options
 declare -a BOOTLOADER_TYPES_OPTIONS=("grub" "systemd-boot")
 
