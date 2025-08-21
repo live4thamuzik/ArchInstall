@@ -202,7 +202,7 @@ do_auto_raid_luks_lvm_partitioning() {
         current_start_mib=$((current_start_mib + BOOT_PART_SIZE_MIB))
         
         # 3. Main LUKS Container Partition (takes rest of disk, will be part of RAID1 for LUKS)
-        parted -s "$disk" mkpart primary ext4 "${current_start_mib}MiB" "100%" || error_exit "Failed to create LUKS container partition on $disk." # FIX: Changed linux-raid to ext4
+        parted -s "$disk" mkpart primary ext4 "${current_start_mib}MiB" "100%" || error_exit "Failed to create LUKS container partition on $disk."
         parted -s "$disk" set "$luks_part_num" raid on || log_warn "Failed to set RAID flag on LUKS partition on $disk."
         partprobe "$disk"
     done
