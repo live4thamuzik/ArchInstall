@@ -18,8 +18,8 @@ RAID_LEVEL=""                 # e.g., "1", "5". Blank initially.
 RAID_DEVICES=()               # Array of disks for RAID, if applicable. Empty initially.
 
 # Default Partition Sizes (for auto-partitioning schemes) - in MiB for parted calculations
-EFI_PART_SIZE_MIB=512         # 512 MiB for EFI partition
-BOOT_PART_SIZE_MIB=1024       # 1024 MiB (1 GiB) for /boot partition
+EFI_PART_SIZE_MIB=1024         # 1024 MiB for EFI partition
+BOOT_PART_SIZE_MIB=2048       # 2048 MiB (1 GiB) for /boot partition
 
 # Filesystem types for root and home partitions - will be selected by user
 ROOT_FILESYSTEM_TYPE="ext4"   # Default FS for root, will be overridden by prompt
