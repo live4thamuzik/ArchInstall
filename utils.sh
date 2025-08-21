@@ -244,6 +244,7 @@ setup_lvm() {
     local lv_size="${LV_LAYOUT_LV_ROOT}"
     local lv_mnt_point="${DEFAULT_LV_MOUNTPOINTS_LV_ROOT}"
     local lv_fs_type="${DEFAULT_LV_FSTYPES_LV_ROOT}"
+    local lv_path=""
 
     log_info "Creating Logical Volume $lv_name ($lv_size) in VG $vg_name..."
     if echo "$lv_size" | grep -q '%'; then
@@ -252,8 +253,22 @@ setup_lvm() {
         lvcreate -L "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
     fi
 
-    # Path to the created LV is now valid
-    local lv_path=$(get_lvm_lv_path "$vg_name" "$lv_name")
+    # Check for the existence of the LV device file
+    log_info "Waiting for logical volume device to appear..."
+    local check_path=""
+    for i in $(seq 1 10); do
+        check_path=$(get_lvm_lv_path "$vg_name" "$lv_name")
+        if [ -b "$check_path" ]; then
+            lv_path="$check_path"
+            break
+        fi
+        sleep 0.5
+    done
+
+    if [ -z "$lv_path" ]; then
+        error_exit "Logical volume device file for $lv_name did not appear."
+    fi
+
     LV_ROOT_PATH="$lv_path" # Assign to global variable
     
     format_filesystem "$lv_path" "$lv_fs_type"
@@ -265,41 +280,67 @@ setup_lvm() {
     if [ "$WANT_SWAP" == "yes" ]; then
         lv_name="lv_swap"
         lv_size="${LV_LAYOUT_LV_SWAP}"
-        lv_path=$(get_lvm_lv_path "$vg_name" "$lv_name")
-        lv_fs_type="${DEFAULT_LV_FSTYPES_LV_SWAP}"
-
+        
         log_info "Creating Logical Volume $lv_name ($lv_size) in VG $vg_name..."
         if echo "$lv_size" | grep -q '%'; then
             lvcreate -l "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
         else
             lvcreate -L "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
         fi
-        LV_SWAP_PATH="$lv_path" # Assign to global variable
+        
+        # Check for the existence of the LV device file
+        local swap_path=""
+        for i in $(seq 1 10); do
+            swap_path=$(get_lvm_lv_path "$vg_name" "$lv_name")
+            if [ -b "$swap_path" ]; then
+                break
+            fi
+            sleep 0.5
+        done
+        if [ -z "$swap_path" ]; then
+            error_exit "Logical volume device file for $lv_name did not appear."
+        fi
 
-        format_filesystem "$lv_path" "$lv_fs_type"
-        capture_id_for_config "$lv_name" "$lv_path" "UUID"
-        swapon "$lv_path" || error_exit "Failed to activate swap LV: $lv_path."
+        LV_SWAP_PATH="$swap_path" # Assign to global variable
+        lv_fs_type="${DEFAULT_LV_FSTYPES_LV_SWAP}"
+        
+        format_filesystem "$swap_path" "$lv_fs_type"
+        capture_id_for_config "$lv_name" "$swap_path" "UUID"
+        swapon "$swap_path" || error_exit "Failed to activate swap LV: $swap_path."
     fi
 
     # Home LV (if desired)
     if [ "$WANT_HOME_PARTITION" == "yes" ]; then
         lv_name="lv_home"
         lv_size="${LV_LAYOUT_LV_HOME}"
-        lv_path=$(get_lvm_lv_path "$vg_name" "$lv_name")
-        lv_mnt_point="${DEFAULT_LV_MOUNTPOINTS_LV_HOME}"
-        lv_fs_type="${DEFAULT_LV_FSTYPES_LV_HOME}"
-
+        
         log_info "Creating Logical Volume $lv_name ($lv_size) in VG $vg_name..."
         if echo "$lv_size" | grep -q '%'; then
             lvcreate -l "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
         else
             lvcreate -L "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
         fi
-        LV_HOME_PATH="$lv_path" # Assign to global variable
 
-        format_filesystem "$lv_path" "$lv_fs_type"
-        capture_id_for_config "$lv_name" "$lv_path" "UUID"
-        safe_mount "$lv_path" "$lv_mnt_point"
+        # Check for the existence of the LV device file
+        local home_path=""
+        for i in $(seq 1 10); do
+            home_path=$(get_lvm_lv_path "$vg_name" "$lv_name")
+            if [ -b "$home_path" ]; then
+                break
+            fi
+            sleep 0.5
+        done
+        if [ -z "$home_path" ]; then
+            error_exit "Logical volume device file for $lv_name did not appear."
+        fi
+
+        LV_HOME_PATH="$home_path" # Assign to global variable
+        lv_mnt_point="${DEFAULT_LV_MOUNTPOINTS_LV_HOME}"
+        lv_fs_type="${DEFAULT_LV_FSTYPES_LV_HOME}"
+        
+        format_filesystem "$home_path" "$lv_fs_type"
+        capture_id_for_config "$lv_name" "$home_path" "UUID"
+        safe_mount "$home_path" "$lv_mnt_point"
     fi
 
     log_info "LVM setup complete for $vg_name."
