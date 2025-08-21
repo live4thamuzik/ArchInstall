@@ -177,6 +177,7 @@ declare -a DESKTOP_ENVIRONMENTS_OPTIONS=(
 declare -a DISPLAY_MANAGER_OPTIONS=(
     "gdm"
     "sddm"
+    "none"
 )
 
 # Bootloader options
