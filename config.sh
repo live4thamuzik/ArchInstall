@@ -173,6 +173,12 @@ declare -a DESKTOP_ENVIRONMENTS_OPTIONS=(
     "none"
 )
 
+# Options for Desktop Environment Selection
+declare -a DESKTOP_ENVIRONMENTS_OPTIONS=(
+    "gdm"
+    "sddm"
+)
+
 # Bootloader options
 declare -a BOOTLOADER_TYPES_OPTIONS=("grub" "systemd-boot")
 
