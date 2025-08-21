@@ -459,7 +459,7 @@ gather_installation_details() {
             kde|hyprland) DISPLAY_MANAGER="sddm";;
             * ) DISPLAY_MANAGER="none";;
         esac
-        select_option "Select Display Manager (default: $DISPLAY_MANAGER):" DISPLAY_MANAGERS DISPLAY_MANAGER
+        select_option "Select Display Manager (default: $DISPLAY_MANAGER):" DISPLAY_MANAGER_OPTIONS DISPLAY_MANAGER
         if [ "$?" -ne 0 ]; then # Check for select_option failure
             error_exit "Display Manager selection failed."
         fi
