@@ -142,7 +142,7 @@ do_auto_luks_lvm_partitioning() {
         part_num=$((part_num + 1))
     fi
 
-    # 3. Dedicated /boot Partition - 1GiB (from your old setup)
+    # 3. Dedicated /boot Partition - 2GiB
     log_info "Creating dedicated /boot partition (${BOOT_PART_SIZE_MIB}MiB)..."
     parted -s "$INSTALL_DISK" mkpart primary ext4 "${current_start_mib}MiB" "$((current_start_mib + BOOT_PART_SIZE_MIB))MiB" || error_exit "Failed to create /boot partition."
     partprobe "$INSTALL_DISK"
