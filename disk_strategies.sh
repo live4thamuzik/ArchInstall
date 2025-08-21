@@ -60,8 +60,9 @@ do_auto_simple_partitioning() {
 
     # Swap Partition (if desired)
     if [ "$WANT_SWAP" == "yes" ]; then
-        log_info "Creating Swap partition (${LV_LAYOUT[lv_swap]})..."
-        local swap_size_mib=$(echo "${LV_LAYOUT[lv_swap]}" | sed 's/G/*1024/' | bc)
+        log_info "Creating Swap partition..."
+        # Use an appropriate size for swap
+        local swap_size_mib=$((2048)) # Defaulting to 2 GiB for a reasonable swap partition
         parted -s "$INSTALL_DISK" mkpart primary linux-swap "${current_start_mib}MiB" "$((current_start_mib + swap_size_mib))MiB" || error_exit "Failed to create swap partition."
         partprobe "$INSTALL_DISK"
         part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
@@ -73,10 +74,10 @@ do_auto_simple_partitioning() {
     fi
 
     # Root Partition and Optional Home Partition
-    local root_size_mib=$(echo "${LV_LAYOUT[lv_root]}" | sed 's/G/*1024/' | bc) # Use ROOT_LV_SIZE from LV_LAYOUT
+    local root_size_mib=$((102400)) # Defaulting to 100 GiB for a reasonable root partition
 
     if [ "$WANT_HOME_PARTITION" == "yes" ]; then
-        log_info "Creating Root partition (${LV_LAYOUT[lv_root]}) and separate Home partition (rest of disk)..."
+        log_info "Creating Root partition and separate Home partition (rest of disk)..."
         # Root partition (fixed size)
         parted -s "$INSTALL_DISK" mkpart primary "$ROOT_FILESYSTEM_TYPE" "${current_start_mib}MiB" "$((current_start_mib + root_size_mib))MiB" || error_exit "Failed to create root partition."
         partprobe "$INSTALL_DISK"
@@ -110,7 +111,6 @@ do_auto_simple_partitioning() {
     log_info "Simple auto partitioning complete. Filesystems formatted and mounted."
 }
 
-
 do_auto_luks_lvm_partitioning() {
     log_info "Starting auto LUKS+LVM partitioning for $INSTALL_DISK (Boot Mode: $BOOT_MODE)..."
 
@@ -128,7 +128,7 @@ do_auto_luks_lvm_partitioning() {
     fi
     partprobe "$INSTALL_DISK"
 
-    # 2. EFI Partition (for UEFI) - 512MiB
+    # 2. EFI Partition (for UEFI) - 1024MiB
     if [ "$BOOT_MODE" == "uefi" ]; then
         log_info "Creating EFI partition (${EFI_PART_SIZE_MIB}MiB)..."
         parted -s "$INSTALL_DISK" mkpart primary fat32 "${current_start_mib}MiB" "$((current_start_mib + EFI_PART_SIZE_MIB))MiB" set "$part_num" esp on || error_exit "Failed to create EFI partition."
@@ -156,13 +156,13 @@ do_auto_luks_lvm_partitioning() {
 
     # 4. Main LUKS Container Partition (takes rest of disk)
     log_info "Creating LUKS container partition (rest of disk)..."
-    parted -s "$INSTALL_DISK" mkpart primary ext4 "${current_start_mib}MiB" "100%" || error_exit "Failed to create LUKS container partition." # FIX: Changed linux-lvm to ext4
+    parted -s "$INSTALL_DISK" mkpart primary ext4 "${current_start_mib}MiB" "100%" || error_exit "Failed to create LUKS container partition."
     partprobe "$INSTALL_DISK"
     part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
     parted -s "$INSTALL_DISK" set "$part_num" lvm on || log_warn "Failed to set LVM flag on LUKS container partition."
 
     # Perform LUKS encryption on this partition
-    local luks_name="lvm" # Consistent with your old script's name for the opened LUKS device
+    local luks_name="lvm"
     encrypt_device "$part_dev" "$luks_name"
 
     # 5. Setup LVM on the encrypted device
