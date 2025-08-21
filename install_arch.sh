@@ -92,7 +92,7 @@ main() {
     export WANT_SWAP WANT_HOME_PARTITION
 
     # Export associative arrays (Bash 4.x+ feature)
-    export -A PARTITION_UUIDS LUKS_DEVICES_MAP LVM_DEVICES_MAP
+    # export -A PARTITION_UUIDS LUKS_DEVICES_MAP LVM_DEVICES_MAP
 
     arch-chroot /mnt /bin/bash "$chroot_target_dir/chroot_config.sh" || error_exit "Chroot configuration failed."
 
