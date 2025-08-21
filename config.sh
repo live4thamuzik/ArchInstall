@@ -186,6 +186,13 @@ declare -a BOOTLOADER_TYPES_OPTIONS=("grub" "systemd-boot")
 # AUR Helper options
 declare -a AUR_HELPERS_OPTIONS=("yay" "paru")
 
+# GRUB Theme Options
+declare -a GRUB_THEME_OPTIONS=(
+    "PolyDark"
+    "CyberEXS"
+    "CyberPunk"
+    "HyperFluent"
+)
 
 # --- Package Lists (Indexed Arrays of space-separated strings) ---
 # Each variable name indicates the choice (e.g., _GNOME_PACKAGES).
