@@ -255,7 +255,7 @@ configure_grub_cmdline_chroot() {
     fi
 
     if [ "$WANT_ENCRYPTION" == "yes" ]; then
-        local luks_container_uuid="${PARTITION_UUIDS[luks_container_uuid]}"
+        local luks_container_uuid="${PARTITION_UUIDS_LUKS_CONTAINER_UUID}"
         if [ -z "$luks_container_uuid" ]; then
             _log_error "LUKS UUID not found for GRUB command line."
         fi
@@ -266,9 +266,9 @@ configure_grub_cmdline_chroot() {
         kernel_cmdline+=" ${GRUB_CMDLINE_LVM_ON_LUKS}"
     fi
 
-    local root_fs_uuid="${PARTITION_UUIDS[lv_root_uuid]:-}"
+    local root_fs_uuid="${PARTITION_UUIDS_LV_ROOT_UUID}"
     if [ -z "$root_fs_uuid" ]; then
-        root_fs_uuid="${PARTITION_UUIDS[root_uuid]:-}"
+        root_fs_uuid="${PARTITION_UUIDS_ROOT_UUID}"
     fi
 
     if [ -z "$root_fs_uuid" ]; then
