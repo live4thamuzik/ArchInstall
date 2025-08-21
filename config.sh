@@ -174,7 +174,7 @@ declare -a DESKTOP_ENVIRONMENTS_OPTIONS=(
 )
 
 # Options for Desktop Environment Selection
-declare -a DESKTOP_ENVIRONMENTS_OPTIONS=(
+declare -a DISPLAY_MANAGER_OPTIONS=(
     "gdm"
     "sddm"
 )
