@@ -342,7 +342,7 @@ configure_mirrors_live() {
     fi
 
     log_info "Running reflector to generate new mirrorlist..."
-    reflector --country "$country_code" -a 72 -f 10 -l 10 --sort rate --save "$mirrorlist_path" || error_exit "Reflector failed to update mirrorlist."
+    reflector -c "$country_code" -a 72 -f 10 -l 10 --sort rate --save "$mirrorlist_path" || error_exit "Reflector failed to update mirrorlist."
     log_info "Pacman mirrorlist configured successfully."
 }
 
