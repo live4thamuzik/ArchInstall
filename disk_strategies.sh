@@ -4,8 +4,18 @@
 # --- Main Dispatcher for Disk Strategy ---
 execute_disk_strategy() {
     log_info "Executing disk strategy: $PARTITION_SCHEME"
-    # Call the appropriate function based on user's choice
-    local strategy_func="${PARTITION_STRATEGY_FUNCTIONS[$PARTITION_SCHEME]}"
+    
+    local strategy_func=""
+    local i=0
+    # Iterate through the array to find the corresponding function name
+    # We do this instead of direct string-based indexing, which fails in Bash 3.x
+    while [ "$i" -lt "${#PARTITION_STRATEGY_FUNCTIONS[@]}" ]; do
+        if [ "${PARTITION_STRATEGY_FUNCTIONS[$i]}" == "$PARTITION_SCHEME" ]; then
+            strategy_func="${PARTITION_STRATEGY_FUNCTIONS[$((i+1))]}"
+            break
+        fi
+        i=$((i+2))
+    done
 
     if [[ -n "$strategy_func" ]]; then
         "$strategy_func" || error_exit "Disk strategy '$PARTITION_SCHEME' failed."
