@@ -242,18 +242,19 @@ setup_lvm() {
     # Root LV
     local lv_name="lv_root"
     local lv_size="${LV_LAYOUT_LV_ROOT}"
-    local lv_path=$(get_lvm_lv_path "$vg_name" "$lv_name")
     local lv_mnt_point="${DEFAULT_LV_MOUNTPOINTS_LV_ROOT}"
     local lv_fs_type="${DEFAULT_LV_FSTYPES_LV_ROOT}"
 
     log_info "Creating Logical Volume $lv_name ($lv_size) in VG $vg_name..."
-    # Check for Bash 3.x compatibility for percent expansion using grep
     if echo "$lv_size" | grep -q '%'; then
         lvcreate -l "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
     else
         lvcreate -L "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
     fi
-    LV_ROOT_PATH="$lv_path" # Assign to global variable for Bash 3.x
+
+    # Path to the created LV is now valid
+    local lv_path=$(get_lvm_lv_path "$vg_name" "$lv_name")
+    LV_ROOT_PATH="$lv_path" # Assign to global variable
     
     format_filesystem "$lv_path" "$lv_fs_type"
     capture_id_for_config "$lv_name" "$lv_path" "UUID"
@@ -273,7 +274,7 @@ setup_lvm() {
         else
             lvcreate -L "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
         fi
-        LV_SWAP_PATH="$lv_path" # Assign to global variable for Bash 3.x
+        LV_SWAP_PATH="$lv_path" # Assign to global variable
 
         format_filesystem "$lv_path" "$lv_fs_type"
         capture_id_for_config "$lv_name" "$lv_path" "UUID"
@@ -294,7 +295,7 @@ setup_lvm() {
         else
             lvcreate -L "$lv_size" "$vg_name" -n "$lv_name" || error_exit "lvcreate failed for $lv_name."
         fi
-        LV_HOME_PATH="$lv_path" # Assign to global variable for Bash 3.x
+        LV_HOME_PATH="$lv_path" # Assign to global variable
 
         format_filesystem "$lv_path" "$lv_fs_type"
         capture_id_for_config "$lv_name" "$lv_path" "UUID"
