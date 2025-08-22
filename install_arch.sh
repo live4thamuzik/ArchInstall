@@ -34,7 +34,7 @@ main() {
     log_header "Stage 3: Installing Base System"
     install_base_system_target || error_exit "Base system installation failed."
 
-    # Stage 4: Chroot Configuration
+     # Stage 4: Chroot Configuration
     log_header "Stage 4: Post-Installation (Chroot) Configuration"
     # Copy essential script files into /mnt for chroot execution
     log_info "Copying chroot configuration files to /mnt..."
@@ -141,7 +141,6 @@ main() {
     /usr/bin/arch-chroot /mnt /bin/bash "$chroot_target_dir/chroot_config.sh" || error_exit "Chroot configuration failed."
 
     log_info "Chroot setup complete."
-
     # Stage 5: Finalization
     log_header "Stage 5: Finalizing Installation"
     final_cleanup || error_exit "Final cleanup failed."
