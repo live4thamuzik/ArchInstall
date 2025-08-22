@@ -10,7 +10,7 @@ SOURCE_DIR_IN_CHROOT="/archl4tm" # Path where install_arch.sh copies these scrip
 source "$SOURCE_DIR_IN_CHROOT/config.sh"
 source "$SOURCE_DIR_IN_CHROOT/utils.sh"
 
-# Note: Variables like INSTALL_DISK, ROOT_PASSWORD, etc. are populated from the environment passed by install_arch.sh
+# Note: Variables like INSTALL_DISK, ROOT_PASSWORD, etc. are now populated from the environment passed by install_arch.sh
 # Associative arrays like PARTITION_UUIDS are also exported (-A).
 # So, they will be directly available in this script's scope.
 
