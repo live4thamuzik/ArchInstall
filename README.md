@@ -5,9 +5,9 @@
 ---
 
 ![License](https://img.shields.io/github/license/live4thamuzik/ArchInstall?style=flat-square)
-![Issues](https://img.shields.com/github/issues/live4thamuzik/ArchInstall?style=flat-square)
+![Issues](https://img.shields.io/github/issues/live4thamuzik/ArchInstall?style=flat-square)
 ![Stars](https://img.shields.io/github/stars/live4thamuzik/ArchInstall?style=flat-square)
-![Last Commit](https://img.shields.io/github/last-commit/live4thamuzik/ArchInstall?style=flat-square)
+![Last Commit](https://img.io/github/last-commit/live4thamuzik/ArchInstall?style=flat-square)
 
 ---
 
@@ -65,58 +65,61 @@ utils.sh               # Helper functions for logging, error handling, and comma
 dialogs.sh             # Interactive dialogs and user input functions
 disk_strategies.sh     # Logic for partitioning, encryption, LVM, and RAID
 chroot_config.sh       # Post-installation configuration tasks inside chroot
-✅ Supported Features
-Feature	Supported
-BIOS + UEFI Boot	✅
-GPT + MBR Partitions	✅
-LUKS Disk Encryption	✅
-LVM + Software RAID	✅
-GRUB + systemd-boot	✅
-GRUB Theming	✅
-mkinitcpio Hook Setup	✅
-AUR Helper Installation	✅
-Dotfiles Git Deployment	✅
-Flatpak + Flathub	✅
-NVIDIA, AMD, Intel GPU	✅
-Microcode Installation	✅
-Multilib Enablement	✅
+```
 
-Export to Sheets
-🖥️ Desktop Environment Support
+---
+
+## ✅ Supported Features
+
+| Feature | Supported |
+| :--- | :--- |
+| BIOS + UEFI Boot | ✅ |
+| GPT + MBR Partitions | ✅ |
+| LUKS Disk Encryption | ✅ |
+| LVM + Software RAID | ✅ |
+| GRUB + systemd-boot | ✅ |
+| GRUB Theming | ✅ |
+| mkinitcpio Hook Setup | ✅ |
+| AUR Helper Installation | ✅ |
+| Dotfiles Git Deployment | ✅ |
+| Flatpak + Flathub | ✅ |
+| NVIDIA, AMD, Intel GPU | ✅ |
+| Microcode Installation | ✅ |
+| Multilib Enablement | ✅ |
+
+---
+
+## 🖥️ Desktop Environment Support
+
 Choose from pre-defined DE/DM pairs or customize your own:
+* GNOME + GDM
+* KDE Plasma + SDDM
+* Hyprland + SDDM
 
-GNOME + GDM
+---
 
-KDE Plasma + SDDM
+## ⚙️ Testing in QEMU (Optional)
 
-Hyprland + SDDM
-
-⚙️ Testing in QEMU (Optional)
 For safe dry-runs in a virtual environment:
 
-Bash
-
+```bash
 qemu-system-x86_64 \
   -m 4G \
   -enable-kvm \
   -boot d \
   -cdrom archlinux.iso \
   -drive file=arch_disk.img,format=qcow2
-📜 License
+```
+
+---
+
+## 📜 License
+
 This project is licensed under the MIT License.
-See the LICENSE file for details.
+See the [LICENSE](LICENSE) file for details.
 
-💬 Feedback & Contributions
-Found a bug? Want a new feature?
-Please open an issue or submit a pull request.
-Contributions are welcome and appreciated!
+---
 
-🙏 Credits
-Built with ❤️ for the Arch Linux community
+## 🙏 Credits
 
-
-
-
-
-
-
+* Built with ❤️ for the Arch Linux community
