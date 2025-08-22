@@ -570,3 +570,12 @@ save_current_config() {
     chmod 600 "$output_file"
     log_info "Configuration saved successfully to $output_file."
 }
+
+# --- Final Cleanup ---
+final_cleanup() {
+    log_info "Performing final cleanup..."
+    safe_umount /mnt/boot/efi || true
+    safe_umount /mnt/boot || true
+    safe_umount /mnt || true
+    log_info "Cleanup complete."
+}
