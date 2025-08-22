@@ -1,6 +1,5 @@
 #!/bin/bash
-# install_arch.sh - A Tasteful Arch Linux Automated Installer
-# Inspired by archl4tm project and "tasteful code" principles.
+# install_arch.sh - Arch Linux Automated Installer
 
 # Strict mode: Exit on error, unset variables, pipefail
 set -euo pipefail
