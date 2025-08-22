@@ -90,9 +90,16 @@ main() {
     export WANT_GRUB_THEME GRUB_THEME_CHOICE WANT_NUMLOCK_ON_BOOT WANT_DOTFILES_DEPLOYMENT
     export DOTFILES_REPO_URL DOTFILES_BRANCH EFI_PART_SIZE_MIB BOOT_PART_SIZE_MIB ROOT_FILESYSTEM_TYPE HOME_FILESYSTEM_TYPE
     export WANT_SWAP WANT_HOME_PARTITION
-
-    # Export associative arrays (Bash 4.x+ feature)
-    # export -A PARTITION_UUIDS LUKS_DEVICES_MAP LVM_DEVICES_MAP
+    
+    # Export scalar variables for UUIDs and paths.
+    export PARTITION_UUIDS_EFI_UUID PARTITION_UUIDS_EFI_PARTUUID PARTITION_UUIDS_ROOT_UUID PARTITION_UUIDS_BOOT_UUID
+    export PARTITION_UUIDS_SWAP_UUID PARTITION_UUIDS_HOME_UUID PARTITION_UUIDS_LUKS_CONTAINER_UUID
+    export PARTITION_UUIDS_LV_ROOT_UUID PARTITION_UUIDS_LV_SWAP_UUID PARTITION_UUIDS_LV_HOME_UUID
+    export LV_ROOT_PATH LV_SWAP_PATH LV_HOME_PATH
+    
+    # Export package lists as arrays (Bash 3.x compatible)
+    # This must be done on the same line as the export command
+    # export BASE_PACKAGES_ESSENTIAL=(...) ...
 
     arch-chroot /mnt /bin/bash "$chroot_target_dir/chroot_config.sh" || error_exit "Chroot configuration failed."
 
