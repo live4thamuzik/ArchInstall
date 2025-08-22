@@ -112,63 +112,56 @@ install_base_system_target() {
     
     local packages_to_install=() # Initialize an array to hold all packages
 
-    # Add essential base packages - ensure it's not empty
-    if [[ -n "${BASE_PACKAGES[essential]}" ]]; then
-        packages_to_install+=(${BASE_PACKAGES[essential]})
+    # Add essential base packages
+    if [[ ${#BASE_PACKAGES_ESSENTIAL[@]} -gt 0 ]]; then
+        packages_to_install+=(${BASE_PACKAGES_ESSENTIAL[@]})
     fi
 
-    local kernel_packages=""
+    local kernel_packages=()
     if [ "$KERNEL_TYPE" == "linux" ]; then
-        kernel_packages="linux linux-firmware linux-headers"
+        kernel_packages+=(${BASE_PACKAGES_KERNEL_LINUX[@]})
     elif [ "$KERNEL_TYPE" == "linux-lts" ]; then
-        kernel_packages="linux-lts linux-lts-headers"
+        kernel_packages+=(${BASE_PACKAGES_KERNEL_LTS[@]})
     else
-        # This error_exit should prevent empty kernel_packages.
         error_exit "Unsupported KERNEL_TYPE: $KERNEL_TYPE."
     fi
-    # Add kernel packages - ensure it's not empty after determination
-    if [[ -n "$kernel_packages" ]]; then
-        packages_to_install+=($kernel_packages)
+    if [[ ${#kernel_packages[@]} -gt 0 ]]; then
+        packages_to_install+=(${kernel_packages[@]})
     fi
     
-    # Add bootloader, network, and general system utilities - ensure they are not empty
-    if [[ -n "${BASE_PACKAGES[bootloader_grub]}" ]]; then
-        packages_to_install+=(${BASE_PACKAGES[bootloader_grub]})
+    # Add bootloader, network, and general system utilities
+    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
+        packages_to_install+=(${BASE_PACKAGES_BOOTLOADER_GRUB[@]})
     fi
-    if [ "$BOOTLOADER_TYPE" == "systemd-boot" ] && [[ -n "${BASE_PACKAGES[bootloader_systemdboot]}" ]]; then
-        packages_to_install+=(${BASE_PACKAGES[bootloader_systemdboot]})
+    if [ "$BOOTLOADER_TYPE" == "systemd-boot" ]; then
+        packages_to_install+=(${BASE_PACKAGES_BOOTLOADER_SYSTEMDBOOT[@]})
     fi
-    if [[ -n "${BASE_PACKAGES[network]}" ]]; then
-        packages_to_install+=(${BASE_PACKAGES[network]})
-    fi
-    if [[ -n "${BASE_PACKAGES[system_utils]}" ]]; then
-        packages_to_install+=(${BASE_PACKAGES[system_utils]})
-    fi
+    packages_to_install+=(${BASE_PACKAGES_NETWORK[@]})
+    packages_to_install+=(${BASE_PACKAGES_SYSTEM_UTILS[@]})
 
-    # Install LVM/RAID tools if chosen (ensure they are not empty)
-    if [ "$WANT_LVM" == "yes" ] && [[ -n "${BASE_PACKAGES[lvm]}" ]]; then
-        packages_to_install+=(${BASE_PACKAGES[lvm]})
+    # Install LVM/RAID tools if chosen
+    if [ "$WANT_LVM" == "yes" ]; then
+        packages_to_install+=(${BASE_PACKAGES_LVM[@]})
     fi
-    if [ "$WANT_RAID" == "yes" ] && [[ -n "${BASE_PACKAGES[raid]}" ]]; then
-        packages_to_install+=(${BASE_PACKAGES[raid]})
+    if [ "$WANT_RAID" == "yes" ]; then
+        packages_to_install+=(${BASE_PACKAGES_RAID[@]})
     fi
     
-    # Add Filesystem utilities based on user choice (ensure they are not empty)
-    if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ] && [[ -n "${BASE_PACKAGES[fs_btrfs]}" ]]; then
-        packages_to_install+=(${BASE_PACKAGES[fs_btrfs]})
-    elif [ "$ROOT_FILESYSTEM_TYPE" == "xfs" ] && [[ -n "${BASE_PACKAGES[fs_xfs]}" ]]; then
-        packages_to_install+=(${BASE_PACKAGES[fs_xfs]})
+    # Add Filesystem utilities based on user choice
+    if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ]; then
+        packages_to_install+=(${BASE_PACKAGES_FS_BTRFS[@]})
+    elif [ "$ROOT_FILESYSTEM_TYPE" == "xfs" ]; then
+        packages_to_install+=(${BASE_PACKAGES_FS_XFS[@]})
     fi
-    # Only add home FS tools if home partition is desired AND FS is not ext4 (ext4 tools are typically in base)
+    
     if [ "$WANT_HOME_PARTITION" == "yes" ]; then
-        if [ "$HOME_FILESYSTEM_TYPE" == "btrfs" ] && [[ -n "${BASE_PACKAGES[fs_btrfs]}" ]]; then
-            packages_to_install+=(${BASE_PACKAGES[fs_btrfs]})
-        elif [ "$HOME_FILESYSTEM_TYPE" == "xfs" ] && [[ -n "${BASE_PACKAGES[fs_xfs]}" ]]; then
-            packages_to_install+=(${BASE_PACKAGES[fs_xfs]})
+        if [ "$HOME_FILESYSTEM_TYPE" == "btrfs" ]; then
+            packages_to_install+=(${BASE_PACKAGES_FS_BTRFS[@]})
+        elif [ "$HOME_FILESYSTEM_TYPE" == "xfs" ]; then
+            packages_to_install+=(${BASE_PACKAGES_FS_XFS[@]})
         fi
     fi
     
-    # Crucial: Ensure the array is not empty before passing to pacstrap
     if [ ${#packages_to_install[@]} -eq 0 ]; then
         error_exit "No packages compiled for base system installation. This should not happen."
     fi
