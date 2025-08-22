@@ -132,5 +132,4 @@ Contributions are welcome and appreciated!
 
 ## 🙏 Credits
 
-* Inspired by [archl4tm](https://github.com/archl4tm/archl4tm)
 * Built with ❤️ for the Arch Linux community
