@@ -40,10 +40,10 @@
     cd ArchInstall
     ```
 
-2.  **Make the script executable and run the installer**:
+2.  **Make the scripts executable and run the installer**:
 
     ```bash
-    chmod +x install_arch.sh
+    chmod +x *.sh
     ./install_arch.sh
     ```
 
