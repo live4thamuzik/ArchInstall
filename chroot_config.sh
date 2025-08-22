@@ -10,7 +10,7 @@ SOURCE_DIR_IN_CHROOT="/archl4tm" # Path where install_arch.sh copies these scrip
 source "$SOURCE_DIR_IN_CHROOT/config.sh"
 source "$SOURCE_DIR_IN_CHROOT/utils.sh"
 
-# Note: Variables like INSTALL_DISK, ROOT_PASSWORD, etc. are now populated from the environment passed by install_arch.sh
+# Note: Variables like INSTALL_DISK, ROOT_PASSWORD, etc. are populated from the environment passed by install_arch.sh
 # Associative arrays like PARTITION_UUIDS are also exported (-A).
 # So, they will be directly available in this script's scope.
 
@@ -75,13 +75,26 @@ main_chroot_config() {
 
     # --- Phase 3: Desktop Environment & Drivers ---
     _log_info "Installing Desktop Environment: $DESKTOP_ENVIRONMENT..."
-    if [[ -n "${DESKTOP_ENVIRONMENTS[$DESKTOP_ENVIRONMENT]}" ]]; then
-        install_packages_chroot ${DESKTOP_ENVIRONMENTS[$DESKTOP_ENVIRONMENT]} || _log_error "Desktop Environment packages installation failed."
+    local de_packages=""
+    case "$DESKTOP_ENVIRONMENT" in
+        "gnome") de_packages="${DESKTOP_ENVIRONMENTS_GNOME_PACKAGES[@]}" ;;
+        "kde") de_packages="${DESKTOP_ENVIRONMENTS_KDE_PACKAGES[@]}" ;;
+        "hyprland") de_packages="${DESKTOP_ENVIRONMENTS_HYPRLAND_PACKAGES[@]}" ;;
+        "none") de_packages="" ;;
+    esac
+    if [[ -n "$de_packages" ]]; then
+        install_packages_chroot "$de_packages" || _log_error "Desktop Environment packages installation failed."
     fi
 
     _log_info "Installing Display Manager: $DISPLAY_MANAGER..."
-    if [[ -n "${DISPLAY_MANAGERS[$DISPLAY_MANAGER]}" ]]; then
-        install_packages_chroot ${DISPLAY_MANAGERS[$DISPLAY_MANAGER]} || _log_error "Display Manager packages installation failed."
+    local dm_packages=""
+    case "$DISPLAY_MANAGER" in
+        "gdm") dm_packages="${DISPLAY_MANAGERS_GDM_PACKAGES[@]}" ;;
+        "sddm") dm_packages="${DISPLAY_MANAGERS_SDDM_PACKAGES[@]}" ;;
+        "none") dm_packages="" ;;
+    esac
+    if [[ -n "$dm_packages" ]]; then
+        install_packages_chroot "$dm_packages" || _log_error "Display Manager packages installation failed."
         enable_systemd_service_chroot "$DISPLAY_MANAGER" || _log_error "Failed to enable Display Manager service."
     fi
     
@@ -198,12 +211,16 @@ configure_grub_theme_chroot() {
     fi
 
     local theme_name="$GRUB_THEME_CHOICE"
-    local theme_info_string="${GRUB_THEME_SOURCES[$theme_name]}"
+    local theme_info_string=""
 
-    if [ -z "$theme_info_string" ]; then
-        _log_warn "No source info defined for GRUB theme '$theme_name'. Skipping theming."
-        return 0
-    fi
+    # Correctly get the theme URL and file path using case statement and eval
+    case "$theme_name" in
+        "PolyDark")         eval "theme_info_string=\"\${GRUB_THEME_SOURCES_POLY_DARK[*]}\"";;
+        "CyberEXS")         eval "theme_info_string=\"\${GRUB_THEME_SOURCES_CYBEREXS[*]}\"";;
+        "CyberPunk")        eval "theme_info_string=\"\${GRUB_THEME_SOURCES_CYBERPUNK[*]}\"";;
+        "HyperFluent")      eval "theme_info_string=\"\${GRUB_THEME_SOURCES_HYPERFLUENT[*]}\"";;
+        *)                  _log_warn "No source info defined for GRUB theme '$theme_name'. Skipping theming."; return 0;;
+    esac
 
     IFS='|' read -r theme_repo_url theme_file_in_repo_relative <<< "$theme_info_string"
     local theme_clone_dir="/tmp/grub_theme_clone" # Temporary clone location
@@ -327,7 +344,14 @@ install_gpu_drivers_chroot() {
         return 0
     fi
 
-    local gpu_packages="${GPU_DRIVERS[$GPU_DRIVER_TYPE]}"
+    local gpu_packages=""
+    case "$GPU_DRIVER_TYPE" in
+        "amd")      gpu_packages="${GPU_DRIVERS_AMD_PACKAGES[@]}";;
+        "nvidia")   gpu_packages="${GPU_DRIVERS_NVIDIA_PACKAGES[@]}";;
+        "intel")    gpu_packages="${GPU_DRIVERS_INTEL_PACKAGES[@]}";;
+        "none")     gpu_packages="";;
+    esac
+
     if [ -z "$gpu_packages" ]; then
         _log_warn "No packages defined for GPU driver type '$GPU_DRIVER_TYPE'. Skipping installation."
         return 0
@@ -341,7 +365,7 @@ install_gpu_drivers_chroot() {
 # Enables the Multilib repository in pacman.conf.
 enable_multilib_chroot() {
     if [ "$WANT_MULTILIB" == "no" ]; then
-        _log_info "Multilib repository not requested. Skipping."
+        log_info "Multilib repository not requested. Skipping."
         return 0
     fi
 
@@ -361,7 +385,12 @@ install_aur_helper_chroot() {
         return 0
     fi
 
-    local helper_package_name="${AUR_HELPERS[$AUR_HELPER_CHOICE]}"
+    local helper_package_name=""
+    case "$AUR_HELPER_CHOICE" in
+        "yay") helper_package_name="${AUR_HELPERS_YAY_PACKAGES[@]}" ;;
+        "paru") helper_package_name="${AUR_HELPERS_PARU_PACKAGES[@]}" ;;
+    esac
+
     if [ -z "$helper_package_name" ]; then
         _log_error "AUR helper package name not defined for '$AUR_HELPER_CHOICE'."
     fi
