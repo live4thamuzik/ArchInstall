@@ -11,15 +11,15 @@ source "$SOURCE_DIR_IN_CHROOT/config.sh"
 source "$SOURCE_DIR_IN_CHROOT/utils.sh"
 
 # Note: Variables like INSTALL_DISK, ROOT_PASSWORD, etc. are now populated from the environment passed by install_arch.sh
-# Associative arrays like PARTITION_UUIDS are also exported (-A).
+# Associative arrays like PARTITION_UUIDs are also exported (-A).
 # So, they will be directly available in this script's scope.
 
 # Re-define basic logging functions to ensure they are available within this script's context.
 # These will override the log_* from utils.sh that might be sourced, but are safer for this context
 # and ensure consistency if utils.sh is modified.
-_log_info() { echo -e "\e[32m[INFO]\e[0m \$(date +%T) $*"; }
-_log_warn() { echo -e "\e[33m[WARN]\e[0m \$(date +%T) $*" >&2; }
-_log_error() { echo -e "\e[31m[ERROR]\e[0m \$(date +%T) $*" >&2; exit 1; }
+_log_info() { echo -e "\e[32m[INFO]\e[0m $(date +%T) $*"; }
+_log_warn() { echo -e "\e[33m[WARN]\e[0m $(date +%T) $*" >&2; }
+_log_error() { echo -e "\e[31m[ERROR]\e[0m $(date +%T) $*" >&2; exit 1; }
 _log_success() { echo -e "\n\e[32;1m==================================================\e[0m\n\e[32;1m $* \e[0m\n\e[32;1m==================================================\e[0m\n"; }
 
 
@@ -36,7 +36,7 @@ main_chroot_config() {
 
     _log_info "Setting localization (locale, keymap)..."
     echo "LANG=$LOCALE" > /etc/locale.conf || _log_error "Failed to set locale.conf."
-    sed -i "/^#$(echo "$LOCALE" | sed 's/\./\\./g')/s/^#//" /etc/locale.gen || _log_error "Failed to generate locales."
+    sed -i "/^#$(echo "$LOCALE" | sed 's/\./\\./g')/s/^#//" /etc/locale.gen || _log_error "Failed to uncomment locale in locale.gen."
     locale-gen || _log_error "Failed to generate locales."
     echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf || _log_error "Failed to set vconsole.conf."
 
