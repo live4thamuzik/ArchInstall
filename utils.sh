@@ -404,7 +404,7 @@ run_pacstrap_base_install() {
 
     # Pass all arguments passed to run_pacstrap_base_install directly to pacstrap
     # This expects arguments to be individual package names.
-    pacstrap -K --noconfirm --needed /mnt "$@" || error_exit "Pacstrap failed to install base system."
+    pacstrap -K /mnt "$@" --noconfirm --needed || error_exit "Pacstrap failed to install base system."
 
     log_info "Pacstrap base system complete."
 }
