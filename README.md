@@ -36,7 +36,7 @@
 1.  **Clone the repository** from a Live Arch Linux ISO session:
 
     ```bash
-    git clone [https://github.com/live4thamuzik/ArchInstall.git](https://github.com/live4thamuzik/ArchInstall.git)
+    git clone https://github.com/live4thamuzik/ArchInstall.git]
     cd ArchInstall
     ```
 
