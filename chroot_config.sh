@@ -6,10 +6,17 @@
 set -euo pipefail
 
 # Source its own copy of utils.sh from its copied location
-SOURCE_DIR_IN_CHROOT="/archl4tm" # Path where install_arch.sh copies these scripts
+SOURCE_DIR_IN_CHROOT="/archinstall" # Path where install_arch.sh copies these scripts
+source "$SOURCE_DIR_IN_CHROOT/config.sh"
 source "$SOURCE_DIR_IN_CHROOT/utils.sh"
 
+# Note: Variables like INSTALL_DISK, ROOT_PASSWORD, etc. are now populated from the environment passed by install_arch.sh
+# Associative arrays like PARTITION_UUIDs are also exported (-A).
+# So, they will be directly available in this script's scope.
+
 # Re-define basic logging functions to ensure they are available within this script's context.
+# These will override the log_* from utils.sh that might be sourced, but are safer for this context
+# and ensure consistency if utils.sh is modified.
 _log_info() { echo -e "\e[32m[INFO]\e[0m $(date +%T) $*"; }
 _log_warn() { echo -e "\e[33m[WARN]\e[0m $(date +%T) $*" >&2; }
 _log_error() { echo -e "\e[31m[ERROR]\e[0m $(date +%T) $*" >&2; exit 1; }
