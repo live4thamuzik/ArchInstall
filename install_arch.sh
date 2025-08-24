@@ -13,7 +13,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/disk_strategies.sh"
 
 # --- Main Installation Function ---
 main() {
-    log_header "ARCHL4TM: Tasteful Arch Linux Installation"
+    log_header "Arch Linux Automated Installer"
 
     check_prerequisites || error_exit "Prerequisite check failed."
 
@@ -39,7 +39,7 @@ main() {
     # Copy essential script files into /mnt for chroot execution
     log_info "Copying chroot configuration files to /mnt..."
     local script_root_dir="$(dirname "${BASH_SOURCE[0]}")"
-    local chroot_target_dir="/archl4tm"
+    local chroot_target_dir="archinstall"
     local install_script_path_in_chroot="/mnt/$chroot_target_dir"
 
     mkdir -p "$install_script_path_in_chroot" || error_exit "Failed to create target directory '$install_script_path_in_chroot'."
