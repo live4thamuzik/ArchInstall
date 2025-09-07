@@ -1,4 +1,4 @@
-# 🚀 ArchInstall - Arch Linux Installer
+# 🚀 ArchInstall - Arch Linux Installer (UNDER CONSTRUCTION)
 
 > Modular, interactive, and flexible Arch Linux installation powered by Bash
 
