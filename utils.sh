@@ -412,14 +412,14 @@ run_pacstrap_base_install() {
 install_packages_chroot() {
     local packages="$@"
     log_info "Installing packages inside chroot: '$packages'..."
-    arch-chroot /mnt pacman -S --noconfirm --needed $packages || error_exit "Failed to install packages inside chroot: '$packages'."
+    pacman -S --noconfirm --needed $packages || error_exit "Failed to install packages inside chroot: '$packages'."
     log_info "Packages installed inside chroot: '$packages'."
 }
 
 # Updates the entire system inside the chroot.
 update_system_chroot() {
     log_info "Updating entire system inside chroot..."
-    arch-chroot /mnt pacman -Syu --noconfirm || error_exit "Failed to update system inside chroot."
+    pacman -Syu --noconfirm || error_exit "Failed to update system inside chroot."
     log_info "System updated inside chroot."
 }
 
@@ -437,7 +437,7 @@ install_microcode_chroot() {
     fi
 
     log_info "Installing $microcode_package inside chroot..."
-    arch-chroot /mnt pacman -Sy --noconfirm --needed "$microcode_package" || error_exit "Failed to install $microcode_package inside chroot."
+    pacman -Sy --noconfirm --needed "$microcode_package" || error_exit "Failed to install $microcode_package inside chroot."
     log_info "$microcode_package installed."
 }
 
@@ -459,9 +459,9 @@ edit_file_in_chroot() {
     log_info "Editing $file_path inside chroot with sed: '$sed_expr'"
     
     # Create a backup before editing
-    arch-chroot /mnt cp "$file_path" "${file_path}.bak" || log_warn "Failed to create backup of $file_path."
+    cp "$file_path" "${file_path}.bak" || log_warn "Failed to create backup of $file_path."
 
-    arch-chroot /mnt sed -i "$sed_expr" "$file_path" || error_exit "Failed to edit $file_path inside chroot."
+    sed -i "$sed_expr" "$file_path" || error_exit "Failed to edit $file_path inside chroot."
     log_info "File $file_path modified."
 }
 
@@ -470,7 +470,7 @@ edit_file_in_chroot() {
 enable_systemd_service_chroot() {
     local service_name="$1"
     log_info "Enabling systemd service $service_name inside chroot..."
-    arch-chroot /mnt systemctl enable "$service_name" || error_exit "Failed to enable service $service_name inside chroot."
+    systemctl enable "$service_name" || error_exit "Failed to enable service $service_name inside chroot."
     log_info "Service $service_name enabled."
 }
 
@@ -569,11 +569,22 @@ save_current_config() {
     log_info "Configuration saved successfully to $output_file."
 }
 
-# --- Final Cleanup ---
+run_in_chroot() {
+    local script_to_run="$1"
+    
+    log_info "Executing chroot script: ${script_to_run}"
+    # arch-chroot handles mounting /proc, /sys, /dev, etc. automatically
+    arch-chroot /mnt /bin/bash -c "${script_to_run}" || error_exit "Chroot script execution failed: ${script_to_run}"
+    
+    log_info "Chroot script executed successfully."
+    return 0
+}
+
+# --- Final Cleanup Function ---
 final_cleanup() {
-    log_info "Performing final cleanup..."
-    safe_umount /mnt/boot/efi || true
-    safe_umount /mnt/boot || true
-    safe_umount /mnt || true
-    log_info "Cleanup complete."
+    log_info "Unmounting all filesystems under /mnt..."
+    # The -R flag recursively unmounts all filesystems rooted at the specified directory.
+    # The script will exit if this command fails due to 'set -e'.
+    umount -R /mnt
+    log_success "All temporary filesystems unmounted successfully."
 }
