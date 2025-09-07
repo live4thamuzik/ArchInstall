@@ -19,7 +19,7 @@ RAID_DEVICES=()               # Array of disks for RAID, if applicable. Empty in
 
 # Default Partition Sizes (for auto-partitioning schemes) - in MiB for parted calculations
 EFI_PART_SIZE_MIB=1024         # 1024 MiB for EFI partition
-BOOT_PART_SIZE_MIB=2048       # 2048 MiB (1 GiB) for /boot partition
+BOOT_PART_SIZE_MIB=2048       # 2048 MiB (2 GiB) for /boot partition
 
 # Filesystem types for root and home partitions - will be selected by user
 ROOT_FILESYSTEM_TYPE="ext4"   # Default FS for root, will be overridden by prompt
@@ -92,7 +92,7 @@ LV_HOME_PATH=""     # Populated dynamically by setup_lvm
 VG_NAME="volgroup0" # Default LVM Volume Group name (from your old script)
 
 
-# --- Options for Dialogs (Indexed Arrays for select_option) ---
+# --- Options for Dialogs (Indexed Arrays of space-separated strings) ---
 
 # Partitioning strategies: strings where key and value are separated for manual lookup.
 # For example, PARTITION_STRATEGY_FUNCTIONS[0]="auto_simple", PARTITION_STRATEGY_FUNCTIONS[1]="do_auto_simple_partitioning"
