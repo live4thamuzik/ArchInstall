@@ -34,113 +34,41 @@ main() {
     log_header "Stage 3: Installing Base System"
     install_base_system_target || error_exit "Base system installation failed."
 
-     # Stage 4: Chroot Configuration
+    # Stage 4: Chroot Configuration
     log_header "Stage 4: Post-Installation (Chroot) Configuration"
-    # Copy essential script files into /mnt for chroot execution
+
     log_info "Copying chroot configuration files to /mnt..."
-    local script_root_dir="$(dirname "${BASH_SOURCE[0]}")"
-    local chroot_target_dir="archinstall"
-    local install_script_path_in_chroot="/mnt/$chroot_target_dir"
+    cp -v ./chroot_config.sh ./config.sh ./utils.sh ./disk_strategies.sh ./dialogs.sh /mnt || error_exit "Failed to copy all necessary scripts to chroot."
 
-    mkdir -p "$install_script_path_in_chroot" || error_exit "Failed to create target directory '$install_script_path_in_chroot'."
-    
-    # Copy chroot_config.sh
-    if [ ! -f "$script_root_dir/chroot_config.sh" ]; then
-        error_exit "Source file not found: $script_root_dir/chroot_config.sh. Cannot proceed."
-    fi
-    log_info "Attempting to copy $script_root_dir/chroot_config.sh..."
-    cp "$script_root_dir/chroot_config.sh" "$install_script_path_in_chroot/" || error_exit "Failed to copy chroot_config.sh."
-    if [ ! -f "$install_script_path_in_chroot/chroot_config.sh" ]; then
-        error_exit "Destination file NOT FOUND after copying: $install_script_path_in_chroot/chroot_config.sh."
+    # Verify the files exist at the destination
+    if [ ! -f "/mnt/chroot_config.sh" ] || \
+       [ ! -f "/mnt/config.sh" ] || \
+       [ ! -f "/mnt/utils.sh" ] || \
+       [ ! -f "/mnt/disk_strategies.sh" ] || \
+       [ ! -f "/mnt/dialogs.sh" ]; then
+        error_exit "One or more required script files not found in destination directory after copying."
     fi
 
-    # Copy config.sh
-    if [ ! -f "$script_root_dir/config.sh" ]; then
-        error_exit "Source file not found: $script_root_dir/config.sh. Cannot proceed."
-    fi
-    log_info "Attempting to copy $script_root_dir/config.sh..."
-    cp "$script_root_dir/config.sh" "$install_script_path_in_chroot/" || error_exit "Failed to copy config.sh to chroot."
-    if [ ! -f "$install_script_path_in_chroot/config.sh" ]; then
-        error_exit "Destination file NOT FOUND after copying: $install_script_path_in_chroot/config.sh."
-    fi
-
-    # Copy utils.sh
-    if [ ! -f "$script_root_dir/utils.sh" ]; then
-        error_exit "Source file not found: $script_root_dir/utils.sh. Cannot proceed."
-    fi
-    log_info "Attempting to copy $script_root_dir/utils.sh..."
-    cp "$script_root_dir/utils.sh" "$install_script_path_in_chroot/" || error_exit "Failed to copy utils.sh to chroot."
-    if [ ! -f "$install_script_path_in_chroot/utils.sh" ]; then
-        error_exit "Destination file NOT FOUND after copying: $install_script_path_in_chroot/utils.sh."
-    fi
-    
     log_info "Setting permissions for chroot scripts..."
-    arch-chroot /mnt chmod +x "$chroot_target_dir/chroot_config.sh" || error_exit "Failed to make chroot script executable."
-    arch-chroot /mnt chmod +x "$chroot_target_dir/config.sh" || error_exit "Failed to make chroot config executable."
-    arch-chroot /mnt chmod +x "$chroot_target_dir/utils.sh" || error_exit "Failed to make chroot utils executable."
+    chmod +x /mnt/*.sh || error_exit "Failed to make chroot scripts executable."
+    
+    log_info "Exporting variables for chroot environment..."
+    export PARTITION_UUIDS_EFI_UUID PARTITION_UUIDS_EFI_PARTUUID PARTITION_UUIDS_ROOT_UUID PARTITION_UUIDS_BOOT_UUID PARTITION_UUIDS_SWAP_UUID PARTITION_UUIDS_HOME_UUID PARTITION_UUIDS_LUKS_CONTAINER_UUID PARTITION_UUIDS_LV_ROOT_UUID PARTITION_UUIDS_LV_SWAP_UUID PARTITION_UUIDS_LV_HOME_UUID
+    export LUKS_CRYPTROOT_DEV LV_ROOT_PATH LV_SWAP_PATH LV_HOME_PATH VG_NAME
+    export KERNEL_TYPE CPU_MICROCODE_TYPE TIMEZONE LOCALE KEYMAP REFLECTOR_COUNTRY_CODE SYSTEM_HOSTNAME
+    export ROOT_PASSWORD MAIN_USERNAME MAIN_USER_PASSWORD
+    export DESKTOP_ENVIRONMENT DISPLAY_MANAGER GPU_DRIVER_TYPE BOOTLOADER_TYPE ENABLE_OS_PROBER
+    export WANT_MULTILIB WANT_AUR_HELPER AUR_HELPER_CHOICE WANT_FLATPAK
+    export INSTALL_CUSTOM_PACKAGES CUSTOM_PACKAGES INSTALL_CUSTOM_AUR_PACKAGES CUSTOM_AUR_PACKAGES
+    export WANT_GRUB_THEME GRUB_THEME_CHOICE WANT_NUMLOCK_ON_BOOT
+    export WANT_DOTFILES_DEPLOYMENT DOTFILES_REPO_URL DOTFILES_BRANCH
+    export WANT_LVM WANT_ENCRYPTION WANT_RAID RAID_LEVEL
+    export -a RAID_DEVICES
 
     log_info "Executing chroot configuration script inside chroot..."
-    
-    # Use 'env' to explicitly pass the variables to the chroot session
-    env INSTALL_DISK="$INSTALL_DISK" \
-    BOOT_MODE="$BOOT_MODE" \
-    WANT_ENCRYPTION="$WANT_ENCRYPTION" \
-    LUKS_PASSPHRASE="$LUKS_PASSPHRASE" \
-    VG_NAME="$VG_NAME" \
-    WANT_LVM="$WANT_LVM" \
-    WANT_RAID="$WANT_RAID" \
-    RAID_LEVEL="$RAID_LEVEL" \
-    KERNEL_TYPE="$KERNEL_TYPE" \
-    CPU_MICROCODE_TYPE="$CPU_MICROCODE_TYPE" \
-    TIMEZONE="$TIMEZONE" \
-    LOCALE="$LOCALE" \
-    KEYMAP="$KEYMAP" \
-    REFLECTOR_COUNTRY_CODE="$REFLECTOR_COUNTRY_CODE" \
-    SYSTEM_HOSTNAME="$SYSTEM_HOSTNAME" \
-    ROOT_PASSWORD="$ROOT_PASSWORD" \
-    MAIN_USERNAME="$MAIN_USERNAME" \
-    MAIN_USER_PASSWORD="$MAIN_USER_PASSWORD" \
-    DESKTOP_ENVIRONMENT="$DESKTOP_ENVIRONMENT" \
-    DISPLAY_MANAGER="$DISPLAY_MANAGER" \
-    GPU_DRIVER_TYPE="$GPU_DRIVER_TYPE" \
-    BOOTLOADER_TYPE="$BOOTLOADER_TYPE" \
-    ENABLE_OS_PROBER="$ENABLE_OS_PROBER" \
-    WANT_MULTILIB="$WANT_MULTILIB" \
-    WANT_AUR_HELPER="$WANT_AUR_HELPER" \
-    AUR_HELPER_CHOICE="$AUR_HELPER_CHOICE" \
-    WANT_FLATPAK="$WANT_FLATPAK" \
-    INSTALL_CUSTOM_PACKAGES="$INSTALL_CUSTOM_PACKAGES" \
-    CUSTOM_PACKAGES="$CUSTOM_PACKAGES" \
-    INSTALL_CUSTOM_AUR_PACKAGES="$INSTALL_CUSTOM_AUR_PACKAGES" \
-    CUSTOM_AUR_PACKAGES="$CUSTOM_AUR_PACKAGES" \
-    WANT_GRUB_THEME="$WANT_GRUB_THEME" \
-    GRUB_THEME_CHOICE="$GRUB_THEME_CHOICE" \
-    WANT_NUMLOCK_ON_BOOT="$WANT_NUMLOCK_ON_BOOT" \
-    WANT_DOTFILES_DEPLOYMENT="$WANT_DOTFILES_DEPLOYMENT" \
-    DOTFILES_REPO_URL="$DOTFILES_REPO_URL" \
-    DOTFILES_BRANCH="$DOTFILES_BRANCH" \
-    EFI_PART_SIZE_MIB="$EFI_PART_SIZE_MIB" \
-    BOOT_PART_SIZE_MIB="$BOOT_PART_SIZE_MIB" \
-    ROOT_FILESYSTEM_TYPE="$ROOT_FILESYSTEM_TYPE" \
-    HOME_FILESYSTEM_TYPE="$HOME_FILESYSTEM_TYPE" \
-    WANT_SWAP="$WANT_SWAP" \
-    WANT_HOME_PARTITION="$WANT_HOME_PARTITION" \
-    PARTITION_UUIDS_EFI_UUID="$PARTITION_UUIDS_EFI_UUID" \
-    PARTITION_UUIDS_EFI_PARTUUID="$PARTITION_UUIDS_EFI_PARTUUID" \
-    PARTITION_UUIDS_ROOT_UUID="$PARTITION_UUIDS_ROOT_UUID" \
-    PARTITION_UUIDS_BOOT_UUID="$PARTITION_UUIDS_BOOT_UUID" \
-    PARTITION_UUIDS_SWAP_UUID="$PARTITION_UUIDS_SWAP_UUID" \
-    PARTITION_UUIDS_HOME_UUID="$PARTITION_UUIDS_HOME_UUID" \
-    PARTITION_UUIDS_LUKS_CONTAINER_UUID="$PARTITION_UUIDS_LUKS_CONTAINER_UUID" \
-    PARTITION_UUIDS_LV_ROOT_UUID="$PARTITION_UUIDS_LV_ROOT_UUID" \
-    PARTITION_UUIDS_LV_SWAP_UUID="$PARTITION_UUIDS_LV_SWAP_UUID" \
-    PARTITION_UUIDS_LV_HOME_UUID="$PARTITION_UUIDS_LV_HOME_UUID" \
-    LV_ROOT_PATH="$LV_ROOT_PATH" \
-    LV_SWAP_PATH="$LV_SWAP_PATH" \
-    LV_HOME_PATH="$LV_HOME_PATH" \
-    /usr/bin/arch-chroot /mnt /bin/bash "$chroot_target_dir/chroot_config.sh" || error_exit "Chroot configuration failed."
-
+    run_in_chroot "./chroot_config.sh" || error_exit "Chroot configuration failed."
     log_info "Chroot setup complete."
+    
     # Stage 5: Finalization
     log_header "Stage 5: Finalizing Installation"
     final_cleanup || error_exit "Final cleanup failed."
@@ -148,7 +76,6 @@ main() {
     log_success "Arch Linux installation complete! You can now reboot."
     prompt_reboot_system
 }
-
 # Helper function for base system installation
 install_base_system_target() {
     log_info "Installing base system packages into /mnt..."
@@ -218,3 +145,4 @@ install_base_system_target() {
 
 # --- Call the main function ---
 main "$@"
+}
