@@ -28,14 +28,14 @@ main() {
         verify_iso_signature || log_warn "ISO signature verification failed (continuing anyway)"
     fi
 
-    # Verify the boot mode (UEFI bitness check) - should be early according to Arch guide
-    log_info "Verifying boot mode and UEFI bitness..."
-    verify_boot_mode || error_exit "Boot mode verification failed."
-
     # Stage 1: Gather User Input (Always interactive now, no config loading)
     log_header "Stage 1: Gathering Installation Details"
     gather_installation_details || error_exit "Installation details gathering failed."
     display_summary_and_confirm || error_exit "Installation cancelled by user."
+    
+    # Verify the boot mode (UEFI bitness check) - after user input but before disk partitioning
+    log_info "Verifying boot mode and UEFI bitness..."
+    verify_boot_mode || error_exit "Boot mode verification failed."
     
     # Configure mirrors using reflector AFTER user input (so user choices matter!)
     log_info "Configuring mirrors based on user preferences..."
@@ -96,6 +96,7 @@ main() {
     export DISPLAY_MANAGER
     export BOOTLOADER_TYPE
     export BOOT_MODE
+    export OVERRIDE_BOOT_MODE
     export WANT_SECURE_BOOT
     export WANT_AUR_HELPER
     export AUR_HELPER_CHOICE

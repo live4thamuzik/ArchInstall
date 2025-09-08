@@ -1278,25 +1278,36 @@ configure_grub_cmdline_chroot() {
 # Adds encryption, LVM, RAID, and NVME hooks as needed and rebuilds initramfs
 # Verifies boot mode and UEFI bitness according to Arch Linux installation guide
 verify_boot_mode() {
-    log_info "Detecting system boot mode."
-    if [ -d "/sys/firmware/efi" ]; then # Bash 3.x does not support [[ -d /sys/firmware/efi ]] for directory check
-        BOOT_MODE="uefi"
-        log_info "Detected UEFI boot mode."
-
-        local fw_platform_size_file="/sys/firmware/efi/fw_platform_size"
-        if [ -f "$fw_platform_size_file" ]; then
-            local uefi_bitness=$(cat "$fw_platform_size_file")
-            if [ "$uefi_bitness" == "32" ]; then
-                error_exit "Detected 32-bit UEFI firmware. Arch Linux x86_64 requires 64-bit UEFI or BIOS boot mode. Please switch to BIOS/Legacy boot in your firmware settings or perform a manual installation."
+    log_info "Verifying boot mode and UEFI bitness..."
+    
+    # Check if user has overridden boot mode to BIOS
+    if [ "$OVERRIDE_BOOT_MODE" == "yes" ]; then
+        log_info "User has overridden boot mode to BIOS/Legacy - skipping UEFI bitness check"
+        BOOT_MODE="bios"
+        log_info "Boot mode verification complete: $BOOT_MODE (user override)"
+        return 0
+    fi
+    
+    # Only perform UEFI bitness check if we're in UEFI mode
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        if [ -d "/sys/firmware/efi" ]; then
+            log_info "Verifying UEFI firmware bitness..."
+            local fw_platform_size_file="/sys/firmware/efi/fw_platform_size"
+            if [ -f "$fw_platform_size_file" ]; then
+                local uefi_bitness=$(cat "$fw_platform_size_file")
+                if [ "$uefi_bitness" == "32" ]; then
+                    error_exit "Detected 32-bit UEFI firmware. Arch Linux x86_64 requires 64-bit UEFI or BIOS boot mode. Please switch to BIOS/Legacy boot in your firmware settings or perform a manual installation."
+                fi
+                log_info "Verified ${uefi_bitness}-bit UEFI firmware."
+            else
+                log_warn "Could not determine UEFI firmware bitness (missing $fw_platform_size_file)."
+                log_warn "Proceeding assuming 64-bit UEFI, but manual verification is recommended if issues arise."
             fi
-            log_info "Detected ${uefi_bitness}-bit UEFI firmware." # Bash 3.x doesn't support ${var^^}
         else
-            log_warn "Could not determine UEFI firmware bitness (missing $fw_platform_size_file)."
-            log_warn "Proceeding assuming 64-bit UEFI, but manual verification is recommended if issues arise."
+            log_warn "UEFI mode selected but /sys/firmware/efi not found - this may cause issues"
         fi
     else
-        BOOT_MODE="bios"
-        log_info "Detected BIOS/Legacy boot mode."
+        log_info "BIOS/Legacy boot mode selected - no UEFI bitness check needed"
     fi
     
     log_info "Boot mode verification complete: $BOOT_MODE"
