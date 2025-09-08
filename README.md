@@ -281,6 +281,37 @@ Secure Boot provides additional security but requires manual UEFI configuration.
 3. **Enable "Custom Key" mode** in UEFI
 4. **Verify motherboard supports custom key enrollment**
 
+## 🔐 Security Notice
+
+**IMPORTANT:** Always verify your ISO signature before creating bootable media for security:
+
+### Download from Official Sources
+- **Official Download Page:** [archlinux.org/download](https://archlinux.org/download/)
+- **Recommended US Mirrors:** MIT, Kernel.org, Berkeley, Purdue
+- **Always download both:** `archlinux-YYYY.MM.DD-x86_64.iso` and `archlinux-YYYY.MM.DD-x86_64.iso.sig`
+
+### Verify ISO Signature
+```bash
+# Import Arch Linux signing key
+gpg --auto-key-locate clear,wkd -v --locate-external-key pierre@archlinux.org
+
+# Verify ISO signature
+gpg --verify archlinux-YYYY.MM.DD-x86_64.iso.sig archlinux-YYYY.MM.DD-x86_64.iso
+```
+
+**Expected output:** `Good signature from "Pierre Schmitz <pierre@archlinux.org>"`
+
+### Alternative: Verify Checksums
+```bash
+# Download checksums file
+wget https://mirrors.mit.edu/archlinux/iso/YYYY.MM.DD/sha256sums.txt
+
+# Verify ISO checksum
+sha256sum -c sha256sums.txt
+```
+
+**⚠️ Security Warning:** Never skip ISO verification. Always verify before booting!
+
 ### Post-Installation Steps:
 1. **Boot into your system** (works normally without Secure Boot)
 2. **Enroll keys:** `sbctl enroll-keys`

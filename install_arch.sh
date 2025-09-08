@@ -23,10 +23,6 @@ main() {
 
     check_prerequisites || error_exit "Prerequisite check failed."
 
-    # Verify ISO signature if requested (should be first according to Arch guide)
-    if [ "$VERIFY_ISO_SIGNATURE" == "yes" ]; then
-        verify_iso_signature || log_warn "ISO signature verification failed (continuing anyway)"
-    fi
 
     # Stage 1: Gather User Input (Always interactive now, no config loading)
     log_header "Stage 1: Gathering Installation Details"
@@ -129,7 +125,6 @@ main() {
     export WANT_DOTFILES_DEPLOYMENT
     export DOTFILES_REPO_URL
     export DOTFILES_BRANCH
-    export VERIFY_ISO_SIGNATURE
     export REFLECTOR_COUNTRY_CODE
     export ENABLE_OS_PROBER
     export WANT_BTRFS_ASSISTANT

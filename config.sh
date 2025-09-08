@@ -168,7 +168,6 @@ REFLECTOR_COUNTRY_CODE="US"   # Country code for reflector mirror selection. Def
 SYSTEM_HOSTNAME="archlinux"   # System hostname. Default to "archlinux".
 
 # --- Security Configuration ---
-VERIFY_ISO_SIGNATURE="yes"    # "yes" or "no". Default to "yes".
 
 # --- Desktop Environment Configuration ---
 DESKTOP_ENVIRONMENT=""        # e.g., "gnome", "kde", "hyprland", "none". Blank initially.
