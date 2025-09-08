@@ -220,31 +220,14 @@ gather_installation_details() {
     fi
 
     # Auto-detect boot mode, allow override for BIOS.
-    log_info "Detecting system boot mode."
-    if [ -d "/sys/firmware/efi" ]; then # Bash 3.x does not support [[ -d /sys/firmware/efi ]] for directory check
-        BOOT_MODE="uefi"
-        log_info "Detected UEFI boot mode."
-
-        local fw_platform_size_file="/sys/firmware/efi/fw_platform_size"
-        if [ -f "$fw_platform_size_file" ]; then
-            local uefi_bitness=$(cat "$fw_platform_size_file")
-            if [ "$uefi_bitness" == "32" ]; then
-                error_exit "Detected 32-bit UEFI firmware. Arch Linux x86_64 requires 64-bit UEFI or BIOS boot mode. Please switch to BIOS/Legacy boot in your firmware settings or perform a manual installation."
-            fi
-            log_info "Detected ${uefi_bitness}-bit UEFI firmware." # Bash 3.x doesn't support ${var^^}
-        else
-            log_warn "Could not determine UEFI firmware bitness (missing $fw_platform_size_file)."
-            log_warn "Proceeding assuming 64-bit UEFI, but manual verification is recommended if issues arise."
-        fi
-
-        prompt_yes_no "Force BIOS/Legacy boot mode instead of UEFI?" OVERRIDE_BOOT_MODE
-        if [ "$OVERRIDE_BOOT_MODE" == "yes" ]; then
-            BOOT_MODE="bios"
-            log_warn "Forcing BIOS/Legacy boot mode."
-        fi
-    else
+    # Boot mode is now detected and verified earlier in the installation process
+    # This allows the user to override the detected boot mode if needed
+    log_info "Current boot mode: $BOOT_MODE"
+    
+    prompt_yes_no "Force BIOS/Legacy boot mode instead of UEFI?" OVERRIDE_BOOT_MODE
+    if [ "$OVERRIDE_BOOT_MODE" == "yes" ]; then
         BOOT_MODE="bios"
-        log_info "Detected BIOS/Legacy boot mode."
+        log_warn "Forcing BIOS/Legacy boot mode."
     fi
 
     # Select primary installation disk.

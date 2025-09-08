@@ -23,10 +23,14 @@ main() {
 
     check_prerequisites || error_exit "Prerequisite check failed."
 
-    # Verify ISO signature if requested
+    # Verify ISO signature if requested (should be first according to Arch guide)
     if [ "$VERIFY_ISO_SIGNATURE" == "yes" ]; then
         verify_iso_signature || log_warn "ISO signature verification failed (continuing anyway)"
     fi
+
+    # Verify the boot mode (UEFI bitness check) - should be early according to Arch guide
+    log_info "Verifying boot mode and UEFI bitness..."
+    verify_boot_mode || error_exit "Boot mode verification failed."
 
     # Stage 1: Gather User Input (Always interactive now, no config loading)
     log_header "Stage 1: Gathering Installation Details"
@@ -91,6 +95,7 @@ main() {
     export DESKTOP_ENVIRONMENT
     export DISPLAY_MANAGER
     export BOOTLOADER_TYPE
+    export BOOT_MODE
     export WANT_SECURE_BOOT
     export WANT_AUR_HELPER
     export AUR_HELPER_CHOICE
@@ -127,6 +132,10 @@ main() {
     export REFLECTOR_COUNTRY_CODE
     export ENABLE_OS_PROBER
     export WANT_BTRFS_ASSISTANT
+    export WANT_SWAP
+    export WANT_HOME_PARTITION
+    export LUKS_PASSPHRASE
+    export INSTALL_DISK
     export PARTITION_UUIDS_EFI_UUID
     export PARTITION_UUIDS_EFI_PARTUUID
     export PARTITION_UUIDS_ROOT_UUID
@@ -143,6 +152,38 @@ main() {
     export LV_HOME_PATH
     export VG_NAME
     export -a RAID_DEVICES
+    
+    # Export constants and arrays used in chroot functions
+    export INITCPIO_BASE_HOOKS
+    export INITCPIO_LUKS_HOOK
+    export INITCPIO_LVM_HOOK
+    export INITCPIO_RAID_HOOK
+    export INITCPIO_NVME_HOOK
+    export GRUB_TIMEOUT_DEFAULT
+    export FLATPAK_PACKAGE
+    export LV_LAYOUT_LV_ROOT
+    export LV_LAYOUT_LV_SWAP
+    export LV_LAYOUT_LV_HOME
+    export DEFAULT_LV_MOUNTPOINTS_LV_ROOT
+    export DEFAULT_LV_MOUNTPOINTS_LV_SWAP
+    export DEFAULT_LV_MOUNTPOINTS_LV_HOME
+    export DEFAULT_LV_FSTYPES_LV_ROOT
+    export DEFAULT_LV_FSTYPES_LV_SWAP
+    export DEFAULT_LV_FSTYPES_LV_HOME
+    
+    # Export arrays for package lists
+    export -a DESKTOP_ENVIRONMENTS_GNOME_PACKAGES
+    export -a DESKTOP_ENVIRONMENTS_KDE_PACKAGES
+    export -a DESKTOP_ENVIRONMENTS_HYPRLAND_PACKAGES
+    export -a DISPLAY_MANAGERS_GDM_PACKAGES
+    export -a DISPLAY_MANAGERS_SDDM_PACKAGES
+    export -a GPU_DRIVERS_AMD_PACKAGES
+    export -a GPU_DRIVERS_NVIDIA_PACKAGES
+    export -a GPU_DRIVERS_INTEL_PACKAGES
+    export -a GRUB_THEME_SOURCES_POLY_DARK
+    export -a GRUB_THEME_SOURCES_CYBEREXS
+    export -a GRUB_THEME_SOURCES_CYBERPUNK
+    export -a GRUB_THEME_SOURCES_HYPERFLUENT
 
     log_info "Executing chroot configuration script inside chroot..."
     arch-chroot /mnt /bin/bash -c "LOG_FILE=$LOG_FILE ./chroot_config.sh" || error_exit "Chroot configuration failed."

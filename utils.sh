@@ -1276,6 +1276,33 @@ configure_grub_cmdline_chroot() {
 # Configures mkinitcpio hooks and regenerates initramfs inside chroot environment.
 # Global: WANT_ENCRYPTION, WANT_LVM, WANT_RAID, INSTALL_DISK, INITCPIO_*_HOOK variables
 # Adds encryption, LVM, RAID, and NVME hooks as needed and rebuilds initramfs
+# Verifies boot mode and UEFI bitness according to Arch Linux installation guide
+verify_boot_mode() {
+    log_info "Detecting system boot mode."
+    if [ -d "/sys/firmware/efi" ]; then # Bash 3.x does not support [[ -d /sys/firmware/efi ]] for directory check
+        BOOT_MODE="uefi"
+        log_info "Detected UEFI boot mode."
+
+        local fw_platform_size_file="/sys/firmware/efi/fw_platform_size"
+        if [ -f "$fw_platform_size_file" ]; then
+            local uefi_bitness=$(cat "$fw_platform_size_file")
+            if [ "$uefi_bitness" == "32" ]; then
+                error_exit "Detected 32-bit UEFI firmware. Arch Linux x86_64 requires 64-bit UEFI or BIOS boot mode. Please switch to BIOS/Legacy boot in your firmware settings or perform a manual installation."
+            fi
+            log_info "Detected ${uefi_bitness}-bit UEFI firmware." # Bash 3.x doesn't support ${var^^}
+        else
+            log_warn "Could not determine UEFI firmware bitness (missing $fw_platform_size_file)."
+            log_warn "Proceeding assuming 64-bit UEFI, but manual verification is recommended if issues arise."
+        fi
+    else
+        BOOT_MODE="bios"
+        log_info "Detected BIOS/Legacy boot mode."
+    fi
+    
+    log_info "Boot mode verification complete: $BOOT_MODE"
+    return 0
+}
+
 # Verifies ISO signature for security
 verify_iso_signature() {
     log_info "Verifying ISO signature for security..."
