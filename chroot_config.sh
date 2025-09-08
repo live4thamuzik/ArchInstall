@@ -87,27 +87,47 @@ main_chroot_config() {
     _log_info "Configuring hostname and basic user setup."
     configure_hostname_chroot || _log_error "Hostname configuration failed."
 
-    _log_info "Setting passwords..."
+    _log_info "Setting up user account: $MAIN_USERNAME..."
     
-    # Set root password
-    echo "root:$ROOT_PASSWORD" | chpasswd || _log_error "Failed to set root password" $?
+    # Map archinstall variables to user management function variables
+    USERNAME="$MAIN_USERNAME"
+    USER_PASSWORD="$MAIN_USER_PASSWORD"
     
-    _log_info "Creating main user: $MAIN_USERNAME..."
-    
-    # Debug: Check if MAIN_USERNAME is set
-    if [ -z "$MAIN_USERNAME" ]; then
-        _log_error "MAIN_USERNAME is empty! Cannot create user."
-        _log_error "Available variables: ROOT_PASSWORD=${ROOT_PASSWORD:0:3}***, MAIN_USER_PASSWORD=${MAIN_USER_PASSWORD:0:3}***"
-        error_exit "MAIN_USERNAME variable is not set in chroot environment"
+    # Set root password first to ensure system security
+    _log_info "Setting root password..."
+    if echo "root:$ROOT_PASSWORD" | chpasswd; then
+        _log_success "Root password set successfully"
+    else
+        _log_error "Failed to set root password (exit code: $?)"
+        exit 1
     fi
     
-    # Create user and set password
-    useradd -m -G wheel,power,storage,uucp,network -s /bin/bash "$MAIN_USERNAME" || _log_error "Failed to create user '$MAIN_USERNAME'."
-    echo "$MAIN_USERNAME:$MAIN_USER_PASSWORD" | chpasswd || _log_error "Failed to set password for user '$MAIN_USERNAME'" $?
+    # Create user account with proper groups and home directory
+    _log_info "Creating user account: $USERNAME"
+    if create_user "$USERNAME"; then
+        _log_success "User account creation completed successfully"
+    else
+        _log_error "User account creation failed"
+        exit 1
+    fi
     
-    # Configure sudoers (simplified approach)
-    echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel-sudo || _log_error "Failed to configure sudoers."
-    chmod 0440 /etc/sudoers.d/10-wheel-sudo || _log_error "Failed to set permissions on sudoers file."
+    # Set user password after account creation
+    _log_info "Setting user password for: $USERNAME"
+    if echo "$USERNAME:$USER_PASSWORD" | chpasswd; then
+        _log_success "User password set successfully for: $USERNAME"
+    else
+        _log_error "Failed to set user password for: $USERNAME (exit code: $?)"
+        exit 1
+    fi
+    
+    # Configure sudoers to enable wheel group sudo access
+    _log_info "Configuring sudoers file..."
+    if update_sudoers; then
+        _log_success "sudoers configuration completed successfully"
+    else
+        _log_error "sudoers configuration failed"
+        exit 1
+    fi
 
     # --- Phase 2: Bootloader & Initramfs ---
     _log_info "Configuring bootloader, GRUB defaults, theme, and mkinitpio hooks."

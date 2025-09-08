@@ -727,9 +727,18 @@ secure_password_input() {
 
         # Direct variable assignment (no eval needed)
         case "$result_var_name" in
-            "ROOT_PASSWORD") ROOT_PASSWORD="$password1" ;;
-            "MAIN_USER_PASSWORD") MAIN_USER_PASSWORD="$password1" ;;
-            "LUKS_PASSPHRASE") LUKS_PASSPHRASE="$password1" ;;
+            "ROOT_PASSWORD") 
+                ROOT_PASSWORD="$password1"
+                log_info "ROOT_PASSWORD set to: ${ROOT_PASSWORD:0:3}***"
+                ;;
+            "MAIN_USER_PASSWORD") 
+                MAIN_USER_PASSWORD="$password1"
+                log_info "MAIN_USER_PASSWORD set to: ${MAIN_USER_PASSWORD:0:3}***"
+                ;;
+            "LUKS_PASSPHRASE") 
+                LUKS_PASSPHRASE="$password1"
+                log_info "LUKS_PASSPHRASE set to: ${LUKS_PASSPHRASE:0:3}***"
+                ;;
             *) log_error "Unknown password variable: $result_var_name" ;;
         esac
         
@@ -2071,4 +2080,226 @@ configure_btrfs_snapshots_chroot() {
     else
         log_info "Btrfs snapshots not requested, skipping configuration"
     fi
+}
+
+# =============================================================================
+# USER ACCOUNT MANAGEMENT FUNCTIONS
+# =============================================================================
+
+# --- Input Validation Functions ---
+validate_username() {
+    local username="$1"
+    if [[ "${username,,}" =~ ^[a-z_]([a-z0-9_-]{0,31}|[a-z0-9_-]{0,30}\$)$ ]]; then
+        return 0
+    else
+        log_error "Invalid username format: $username"
+        return 1
+    fi
+}
+
+validate_hostname() {
+    local hostname="$1"
+    if [[ "${hostname,,}" =~ ^[a-z][a-z0-9_.-]{0,62}[a-z0-9]$ ]]; then
+        return 0
+    else
+        log_error "Invalid hostname format: $hostname"
+        return 1
+    fi
+}
+
+# --- User Input Functions ---
+get_username() {
+    log_info "Prompting for username..."
+    while true; do
+        read -r -p "Enter a username: " username
+
+        if ! validate_username "$username"; then
+            continue
+        fi
+
+        export USERNAME="$username"
+        log_success "Username validation successful: $USERNAME"
+        break
+    done
+}
+
+get_user_password() {
+    log_info "Prompting for user password..."
+    while true; do
+        read -rs -p "Set a password for $USERNAME: " USER_PASSWORD1
+        echo
+        read -rs -p "Confirm password: " USER_PASSWORD2
+        echo
+
+        if [[ "$USER_PASSWORD1" != "$USER_PASSWORD2" ]]; then
+            log_error "Password confirmation failed - passwords do not match"
+            continue
+        fi
+
+        if [[ -z "$USER_PASSWORD1" ]]; then
+            log_error "Password cannot be empty"
+            continue
+        fi
+
+        export USER_PASSWORD="$USER_PASSWORD1"
+        log_success "User password set successfully for $USERNAME"
+        break
+    done
+}
+
+get_root_password() {
+    log_info "Prompting for root password..."
+    while true; do
+        read -rs -p "Set root password: " ROOT_PASSWORD1
+        echo
+        read -rs -p "Confirm root password: " ROOT_PASSWORD2
+        echo
+
+        if [[ "$ROOT_PASSWORD1" != "$ROOT_PASSWORD2" ]]; then
+            log_error "Root password confirmation failed - passwords do not match"
+            continue
+        fi
+
+        if [[ -z "$ROOT_PASSWORD1" ]]; then
+            log_error "Root password cannot be empty"
+            continue
+        fi
+
+        export ROOT_PASSWORD="$ROOT_PASSWORD1"
+        log_success "Root password set successfully"
+        break
+    done
+}
+
+get_hostname() {
+    log_info "Prompting for hostname..."
+    while true; do
+        read -r -p "Enter a hostname: " hostname
+
+        if ! validate_hostname "$hostname"; then
+            continue
+        fi
+
+        export HOSTNAME="$hostname"
+        log_success "Hostname validation successful: $HOSTNAME"
+        break
+    done
+}
+
+get_encryption_password() {
+    log_info "Prompting for encryption password..."
+    while true; do
+        read -rs -p "Enter encryption password: " password
+        echo
+        read -rs -p "Confirm encryption password: " confirm_password
+        echo
+
+        if [[ "$password" != "$confirm_password" ]]; then
+            log_error "Encryption password confirmation failed - passwords do not match"
+            continue
+        fi
+
+        if [[ -z "$password" ]]; then
+            log_error "Encryption password cannot be empty"
+            continue
+        fi
+
+        export ENCRYPTION_PASSWORD="$password"
+        log_success "Encryption password set successfully"
+        break
+    done
+}
+
+# --- User Account Creation Functions ---
+create_user() {
+    local username="$1"
+    
+    if [[ -z "$username" ]]; then
+        log_error "create_user: Username parameter is empty"
+        return 1
+    fi
+    
+    log_info "Creating user account: $username"
+    
+    if useradd -m -G wheel,power,storage,uucp,network -s /bin/bash "$username"; then
+        log_success "User account created successfully: $username"
+        return 0
+    else
+        log_error "Failed to create user account: $username (exit code: $?)"
+        return 1
+    fi
+}
+
+set_passwords() {
+    log_info "Setting passwords in correct order..."
+    
+    # Validate required variables
+    if [[ -z "$USERNAME" ]]; then
+        log_error "set_passwords: USERNAME variable is not set"
+        return 1
+    fi
+    
+    if [[ -z "$USER_PASSWORD" ]]; then
+        log_error "set_passwords: USER_PASSWORD variable is not set"
+        return 1
+    fi
+    
+    if [[ -z "$ROOT_PASSWORD" ]]; then
+        log_error "set_passwords: ROOT_PASSWORD variable is not set"
+        return 1
+    fi
+    
+    # Set root password first to ensure system security
+    log_info "Setting root password..."
+    if echo "root:$ROOT_PASSWORD" | chpasswd; then
+        log_success "Root password set successfully"
+    else
+        log_error "Failed to set root password (exit code: $?)"
+        return 1
+    fi
+    
+    # Set user password after root password is secured
+    log_info "Setting user password for: $USERNAME"
+    if echo "$USERNAME:$USER_PASSWORD" | chpasswd; then
+        log_success "User password set successfully for: $USERNAME"
+    else
+        log_error "Failed to set user password for: $USERNAME (exit code: $?)"
+        return 1
+    fi
+    
+    log_success "All passwords set successfully"
+    return 0
+}
+
+# --- Update sudoers file ---
+update_sudoers() {
+    log_info "Configuring sudoers file..."
+    
+    # Create backup of original sudoers file
+    if ! cp /etc/sudoers /etc/sudoers.backup; then
+        log_error "Failed to create sudoers backup"
+        return 1
+    fi
+    
+    # Uncomment the wheel group line in sudoers
+    if ! sed -i 's/^# *%wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers; then
+        log_error "Failed to uncomment wheel group in sudoers"
+        return 1
+    fi
+    
+    # Add targetpw default for password prompting
+    if ! echo 'Defaults targetpw' >> /etc/sudoers; then
+        log_error "Failed to add targetpw default to sudoers"
+        return 1
+    fi
+    
+    # Validate sudoers file syntax
+    if ! visudo -c; then
+        log_error "sudoers file validation failed - restoring backup"
+        cp /etc/sudoers.backup /etc/sudoers
+        return 1
+    fi
+    
+    log_success "sudoers file configured successfully"
+    return 0
 }

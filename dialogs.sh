@@ -270,7 +270,12 @@ gather_installation_details() {
             WANT_RAID="no"
             prompt_yes_no "Do you want a swap Logical Volume?" WANT_SWAP
             prompt_yes_no "Do you want a separate /home Logical Volume?" WANT_HOME_PARTITION
-            secure_password_input "Enter LUKS encryption passphrase: " LUKS_PASSPHRASE
+            if get_encryption_password; then
+                LUKS_PASSPHRASE="$ENCRYPTION_PASSWORD"
+                log_success "Encryption password input completed successfully"
+            else
+                error_exit "Encryption password input failed"
+            fi
             ;;
         auto_raid_luks_lvm)
             WANT_RAID="yes"
@@ -303,7 +308,12 @@ gather_installation_details() {
             select_option "Select RAID level:" RAID_LEVEL_OPTIONS RAID_LEVEL
             prompt_yes_no "Do you want a swap Logical Volume?" WANT_SWAP
             prompt_yes_no "Do you want a separate /home Logical Volume?" WANT_HOME_PARTITION
-            secure_password_input "Enter LUKS encryption passphrase: " LUKS_PASSPHRASE
+            if get_encryption_password; then
+                LUKS_PASSPHRASE="$ENCRYPTION_PASSWORD"
+                log_success "Encryption password input completed successfully"
+            else
+                error_exit "Encryption password input failed"
+            fi
             ;;
         manual)
             log_warn "Manual partitioning selected. You will be guided to perform partitioning steps yourself."
@@ -456,28 +466,45 @@ gather_installation_details() {
 
     log_header "DESKTOP & USER ACCOUNT CONFIGURATION"
 
-    # User Credentials.
-    read -rp "Enter hostname: " SYSTEM_HOSTNAME
-    secure_password_input "Enter root password: " ROOT_PASSWORD
+    # User Credentials - Gather user account information
+    log_info "Gathering user account information..."
     
-    # Export the root password immediately
-    export ROOT_PASSWORD
+    if get_username; then
+        log_success "Username input completed successfully"
+    else
+        error_exit "Username input failed"
+    fi
     
-    # Get main username with validation
-    while [ -z "$MAIN_USERNAME" ]; do
-        read -rp "Enter main username: " MAIN_USERNAME
-        if [ -z "$MAIN_USERNAME" ]; then
-            log_error "Username cannot be empty. Please enter a valid username."
-        fi
-    done
+    if get_user_password; then
+        log_success "User password input completed successfully"
+    else
+        error_exit "User password input failed"
+    fi
     
-    # Export the username immediately
+    if get_root_password; then
+        log_success "Root password input completed successfully"
+    else
+        error_exit "Root password input failed"
+    fi
+    
+    if get_hostname; then
+        log_success "Hostname input completed successfully"
+    else
+        error_exit "Hostname input failed"
+    fi
+    
+    # Map user management variables to archinstall variables
+    MAIN_USERNAME="$USERNAME"
+    MAIN_USER_PASSWORD="$USER_PASSWORD"
+    SYSTEM_HOSTNAME="$HOSTNAME"
+    
+    # Export the credentials immediately
     export MAIN_USERNAME
-    
-    secure_password_input "Enter password for $MAIN_USERNAME: " MAIN_USER_PASSWORD
-    
-    # Export the user password immediately
     export MAIN_USER_PASSWORD
+    export ROOT_PASSWORD
+    export SYSTEM_HOSTNAME
+    
+    log_success "User account configuration completed successfully"
 
     # Desktop Environment and Display Manager.
     select_option "Select Desktop Environment:" DESKTOP_ENVIRONMENTS_OPTIONS DESKTOP_ENVIRONMENT
