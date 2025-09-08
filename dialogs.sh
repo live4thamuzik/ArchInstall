@@ -561,6 +561,20 @@ gather_installation_details() {
         prompt_yes_no "Do you understand the risks and want to enable Secure Boot?" WANT_SECURE_BOOT
     fi
 
+    # ISO Signature Verification
+    echo ""
+    echo "=== ISO INTEGRITY VERIFICATION ==="
+    echo "This will verify the integrity of the Arch Linux ISO you're using."
+    echo "Since you're already booted from the ISO, this checks:"
+    echo "  - Essential Arch Linux files are present"
+    echo "  - ISO structure appears legitimate"
+    echo "  - Built-in checksums (if available)"
+    echo ""
+    echo "Note: This is not a full cryptographic signature verification."
+    echo "For complete security, verify the ISO before booting."
+    echo ""
+    prompt_yes_no "Perform ISO integrity verification?" VERIFY_ISO_SIGNATURE
+
     # Multilib Support (32-bit).
     prompt_yes_no "Enable 32-bit support (multilib repository)?" WANT_MULTILIB
 
@@ -692,7 +706,7 @@ display_summary_and_confirm() {
     echo "    Hostname:           $SYSTEM_HOSTNAME"
     echo "    Mirror Country:     $REFLECTOR_COUNTRY_CODE"
     echo "    CPU Microcode:      $CPU_MICROCODE_TYPE"
-    echo "    PGP Verification:   $VERIFY_ISO_SIGNATURE"
+    echo "    ISO Verification:   $VERIFY_ISO_SIGNATURE"
     echo "    Desktop Environment: $DESKTOP_ENVIRONMENT"
     echo "    Display Manager:    $DISPLAY_MANAGER"
     echo "  Multilib:             $WANT_MULTILIB"
