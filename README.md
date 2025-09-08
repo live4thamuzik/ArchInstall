@@ -18,7 +18,7 @@ ArchInstall is designed for users who want the power and flexibility of Arch Lin
 - **Comprehensive features** - Everything from basic installation to advanced configurations
 - **The "Arch Way"** - Maintains Arch Linux's DIY philosophy while reducing complexity
 
-### 🆚 **vs. Official archinstall**
+### 🆚 **ArchInstall (Bash) vs. Official archinstall (Python)**
 
 | Feature | ArchInstall (This) | Official archinstall |
 |---------|-------------------|---------------------|
