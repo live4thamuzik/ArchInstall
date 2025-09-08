@@ -477,6 +477,9 @@ gather_installation_details() {
     read -rp "Enter hostname: " SYSTEM_HOSTNAME
     secure_password_input "Enter root password: " ROOT_PASSWORD
     
+    # Export the root password immediately
+    export ROOT_PASSWORD
+    
     # Get main username with validation
     while [ -z "$MAIN_USERNAME" ]; do
         read -rp "Enter main username: " MAIN_USERNAME
@@ -485,7 +488,13 @@ gather_installation_details() {
         fi
     done
     
+    # Export the username immediately
+    export MAIN_USERNAME
+    
     secure_password_input "Enter password for $MAIN_USERNAME: " MAIN_USER_PASSWORD
+    
+    # Export the user password immediately
+    export MAIN_USER_PASSWORD
 
     # Desktop Environment and Display Manager.
     select_option "Select Desktop Environment:" DESKTOP_ENVIRONMENTS_OPTIONS DESKTOP_ENVIRONMENT
