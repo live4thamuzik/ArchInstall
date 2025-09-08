@@ -706,8 +706,8 @@ enable_systemd_service_chroot() {
 
 # --- Security / Credential Handling ---
 
-# Prompts user for a password securely with confirmation (based on proven ArchL4TM approach)
-# Args: $1 = prompt_message, $2 = name_of_variable_to_store_password (string)
+# Simple password input with confirmation (based on proven ArchL4TM approach)
+# Args: $1 = prompt_message, $2 = variable_name_to_store_password
 secure_password_input() {
     local prompt_msg="$1"
     local result_var_name="$2"
@@ -725,8 +725,14 @@ secure_password_input() {
             continue
         fi
 
-        # Store the password in the specified variable
-        eval "$result_var_name='$password1'"
+        # Direct variable assignment (no eval needed)
+        case "$result_var_name" in
+            "ROOT_PASSWORD") ROOT_PASSWORD="$password1" ;;
+            "MAIN_USER_PASSWORD") MAIN_USER_PASSWORD="$password1" ;;
+            "LUKS_PASSPHRASE") LUKS_PASSPHRASE="$password1" ;;
+            *) log_error "Unknown password variable: $result_var_name" ;;
+        esac
+        
         log_info "Password set successfully."
         break
     done

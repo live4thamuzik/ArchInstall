@@ -88,11 +88,10 @@ main_chroot_config() {
     configure_hostname_chroot || _log_error "Hostname configuration failed."
 
     _log_info "Setting passwords..."
-    if ! echo "root:$ROOT_PASSWORD" | chpasswd; then
-        _log_error "Failed to set root password" $?
-        exit 1
-    fi
-
+    
+    # Set root password
+    echo "root:$ROOT_PASSWORD" | chpasswd || _log_error "Failed to set root password" $?
+    
     _log_info "Creating main user: $MAIN_USERNAME..."
     
     # Debug: Check if MAIN_USERNAME is set
@@ -102,14 +101,9 @@ main_chroot_config() {
         error_exit "MAIN_USERNAME variable is not set in chroot environment"
     fi
     
-    # Create user using the proven approach from second revision
+    # Create user and set password
     useradd -m -G wheel,power,storage,uucp,network -s /bin/bash "$MAIN_USERNAME" || _log_error "Failed to create user '$MAIN_USERNAME'."
-    
-    # Set user password using the simple method from working version
-    if ! echo "$MAIN_USERNAME:$MAIN_USER_PASSWORD" | chpasswd; then
-        _log_error "Failed to set password for user '$MAIN_USERNAME'" $?
-        exit 1
-    fi
+    echo "$MAIN_USERNAME:$MAIN_USER_PASSWORD" | chpasswd || _log_error "Failed to set password for user '$MAIN_USERNAME'" $?
     
     # Configure sudoers (simplified approach)
     echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel-sudo || _log_error "Failed to configure sudoers."
