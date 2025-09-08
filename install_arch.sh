@@ -96,7 +96,80 @@ main() {
     export -a RAID_DEVICES
 
     log_info "Executing chroot configuration script inside chroot..."
-    run_in_chroot "./chroot_config.sh" || error_exit "Chroot configuration failed."
+    
+    # Debug: Show key variables before chroot
+    log_info "Debug - Key variables before chroot:"
+    log_info "  MAIN_USERNAME: '$MAIN_USERNAME'"
+    log_info "  ROOT_PASSWORD: '${ROOT_PASSWORD:0:3}***'"
+    log_info "  MAIN_USER_PASSWORD: '${MAIN_USER_PASSWORD:0:3}***'"
+    log_info "  SYSTEM_HOSTNAME: '$SYSTEM_HOSTNAME'"
+    
+    # Use the proven method from the working version - pass variables directly
+    arch-chroot /mnt /bin/bash -c "
+        export MAIN_USERNAME='$MAIN_USERNAME'
+        export ROOT_PASSWORD='$ROOT_PASSWORD'
+        export MAIN_USER_PASSWORD='$MAIN_USER_PASSWORD'
+        export SYSTEM_HOSTNAME='$SYSTEM_HOSTNAME'
+        export TIMEZONE='$TIMEZONE'
+        export LOCALE='$LOCALE'
+        export KEYMAP='$KEYMAP'
+        export DESKTOP_ENVIRONMENT='$DESKTOP_ENVIRONMENT'
+        export DISPLAY_MANAGER='$DISPLAY_MANAGER'
+        export BOOTLOADER_TYPE='$BOOTLOADER_TYPE'
+        export WANT_SECURE_BOOT='$WANT_SECURE_BOOT'
+        export WANT_AUR_HELPER='$WANT_AUR_HELPER'
+        export AUR_HELPER_CHOICE='$AUR_HELPER_CHOICE'
+        export WANT_GRUB_THEME='$WANT_GRUB_THEME'
+        export GRUB_THEME_CHOICE='$GRUB_THEME_CHOICE'
+        export WANT_PLYMOUTH='$WANT_PLYMOUTH'
+        export WANT_PLYMOUTH_THEME='$WANT_PLYMOUTH_THEME'
+        export PLYMOUTH_THEME_CHOICE='$PLYMOUTH_THEME_CHOICE'
+        export WANT_BTRFS='$WANT_BTRFS'
+        export WANT_BTRFS_SNAPSHOTS='$WANT_BTRFS_SNAPSHOTS'
+        export BTRFS_SNAPSHOT_FREQUENCY='$BTRFS_SNAPSHOT_FREQUENCY'
+        export BTRFS_KEEP_SNAPSHOTS='$BTRFS_KEEP_SNAPSHOTS'
+        export WANT_ENCRYPTION='$WANT_ENCRYPTION'
+        export WANT_LVM='$WANT_LVM'
+        export WANT_RAID='$WANT_RAID'
+        export RAID_LEVEL='$RAID_LEVEL'
+        export ROOT_FILESYSTEM_TYPE='$ROOT_FILESYSTEM_TYPE'
+        export HOME_FILESYSTEM_TYPE='$HOME_FILESYSTEM_TYPE'
+        export KERNEL_TYPE='$KERNEL_TYPE'
+        export CPU_MICROCODE_TYPE='$CPU_MICROCODE_TYPE'
+        export TIME_SYNC_CHOICE='$TIME_SYNC_CHOICE'
+        export GPU_DRIVER_TYPE='$GPU_DRIVER_TYPE'
+        export WANT_MULTILIB='$WANT_MULTILIB'
+        export WANT_FLATPAK='$WANT_FLATPAK'
+        export INSTALL_CUSTOM_PACKAGES='$INSTALL_CUSTOM_PACKAGES'
+        export CUSTOM_PACKAGES='$CUSTOM_PACKAGES'
+        export INSTALL_CUSTOM_AUR_PACKAGES='$INSTALL_CUSTOM_AUR_PACKAGES'
+        export CUSTOM_AUR_PACKAGES='$CUSTOM_AUR_PACKAGES'
+        export WANT_NUMLOCK_ON_BOOT='$WANT_NUMLOCK_ON_BOOT'
+        export WANT_DOTFILES_DEPLOYMENT='$WANT_DOTFILES_DEPLOYMENT'
+        export DOTFILES_REPO_URL='$DOTFILES_REPO_URL'
+        export DOTFILES_BRANCH='$DOTFILES_BRANCH'
+        export VERIFY_ISO_SIGNATURE='$VERIFY_ISO_SIGNATURE'
+        export REFLECTOR_COUNTRY_CODE='$REFLECTOR_COUNTRY_CODE'
+        export ENABLE_OS_PROBER='$ENABLE_OS_PROBER'
+        export WANT_BTRFS_ASSISTANT='$WANT_BTRFS_ASSISTANT'
+        export PARTITION_UUIDS_EFI_UUID='$PARTITION_UUIDS_EFI_UUID'
+        export PARTITION_UUIDS_EFI_PARTUUID='$PARTITION_UUIDS_EFI_PARTUUID'
+        export PARTITION_UUIDS_ROOT_UUID='$PARTITION_UUIDS_ROOT_UUID'
+        export PARTITION_UUIDS_BOOT_UUID='$PARTITION_UUIDS_BOOT_UUID'
+        export PARTITION_UUIDS_SWAP_UUID='$PARTITION_UUIDS_SWAP_UUID'
+        export PARTITION_UUIDS_HOME_UUID='$PARTITION_UUIDS_HOME_UUID'
+        export PARTITION_UUIDS_LUKS_CONTAINER_UUID='$PARTITION_UUIDS_LUKS_CONTAINER_UUID'
+        export PARTITION_UUIDS_LV_ROOT_UUID='$PARTITION_UUIDS_LV_ROOT_UUID'
+        export PARTITION_UUIDS_LV_SWAP_UUID='$PARTITION_UUIDS_LV_SWAP_UUID'
+        export PARTITION_UUIDS_LV_HOME_UUID='$PARTITION_UUIDS_LV_HOME_UUID'
+        export LUKS_CRYPTROOT_DEV='$LUKS_CRYPTROOT_DEV'
+        export LV_ROOT_PATH='$LV_ROOT_PATH'
+        export LV_SWAP_PATH='$LV_SWAP_PATH'
+        export LV_HOME_PATH='$LV_HOME_PATH'
+        export VG_NAME='$VG_NAME'
+        export RAID_DEVICES='${RAID_DEVICES[@]}'
+        ./chroot_config.sh
+    " || error_exit "Chroot configuration failed."
     log_info "Chroot setup complete."
     
     # Stage 5: Finalization

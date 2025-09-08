@@ -58,6 +58,15 @@ _log_success() { echo -e "\n\e[32;1m============================================
 # Global: All configuration variables exported from install_arch.sh
 main_chroot_config() {
     _log_info "Starting chroot configurations within target system."
+    
+    # Debug: Show all environment variables related to passwords and users
+    _log_info "Debug - Environment variables in chroot:"
+    _log_info "  MAIN_USERNAME: '${MAIN_USERNAME:-NOT_SET}'"
+    _log_info "  ROOT_PASSWORD: '${ROOT_PASSWORD:+SET}' (length: ${#ROOT_PASSWORD})"
+    _log_info "  MAIN_USER_PASSWORD: '${MAIN_USER_PASSWORD:+SET}' (length: ${#MAIN_USER_PASSWORD})"
+    _log_info "  SYSTEM_HOSTNAME: '${SYSTEM_HOSTNAME:-NOT_SET}'"
+    _log_info "  TIMEZONE: '${TIMEZONE:-NOT_SET}'"
+    _log_info "  LOCALE: '${LOCALE:-NOT_SET}'"
 
     # --- Phase 1: Basic System Configuration ---
     _log_info "Configuring pacman for better user experience..."
@@ -71,25 +80,21 @@ main_chroot_config() {
 
     _log_info "Setting root password..."
     
-    # Ensure proper chroot environment setup for password operations
-    _log_info "Ensuring proper chroot environment for password operations..."
-    
-    # Mount necessary filesystems if not already mounted
-    if ! mountpoint -q /proc; then
-        mount -t proc proc /proc || _log_warn "Failed to mount /proc"
-    fi
-    if ! mountpoint -q /sys; then
-        mount -t sysfs sysfs /sys || _log_warn "Failed to mount /sys"
-    fi
-    if ! mountpoint -q /dev; then
-        mount --bind /dev /dev || _log_warn "Failed to bind mount /dev"
+    # Debug: Check if ROOT_PASSWORD is set
+    if [ -z "$ROOT_PASSWORD" ]; then
+        _log_error "ROOT_PASSWORD is empty! Cannot set root password."
+        _log_error "Available environment variables:"
+        env | grep -E "(ROOT|USER|PASSWORD)" || _log_error "No password variables found in environment"
+        exit 1
     fi
     
-    # Set up proper environment for PAM
-    export PAM_TTY="$(tty)"
-    export PAM_RHOST="localhost"
-    
-    set_password_chroot "root" "$ROOT_PASSWORD" || _log_error "Failed to set root password."
+    # Use the simple, reliable method from the working version
+    _log_info "Setting root password using echo method..."
+    if ! echo "root:$ROOT_PASSWORD" | chpasswd; then
+        _log_error "Failed to set root password using chpasswd"
+        exit 1
+    fi
+    _log_info "Root password set successfully."
 
     _log_info "Creating main user: $MAIN_USERNAME..."
     
@@ -102,7 +107,20 @@ main_chroot_config() {
     
     # Create user using the proven approach from second revision
     useradd -m -G wheel,power,storage,uucp,network -s /bin/bash "$MAIN_USERNAME" || _log_error "Failed to create user '$MAIN_USERNAME'."
-    set_password_chroot "$MAIN_USERNAME" "$MAIN_USER_PASSWORD" || _log_error "Failed to set password for '$MAIN_USERNAME'."
+    
+    # Debug: Check if MAIN_USER_PASSWORD is set
+    if [ -z "$MAIN_USER_PASSWORD" ]; then
+        _log_error "MAIN_USER_PASSWORD is empty! Cannot set user password."
+        exit 1
+    fi
+    
+    # Use the simple, reliable method from the working version
+    _log_info "Setting password for user '$MAIN_USERNAME' using echo method..."
+    if ! echo "$MAIN_USERNAME:$MAIN_USER_PASSWORD" | chpasswd; then
+        _log_error "Failed to set password for user '$MAIN_USERNAME' using chpasswd"
+        exit 1
+    fi
+    _log_info "User password set successfully."
     
     # Configure sudoers (simplified approach)
     echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel-sudo || _log_error "Failed to configure sudoers."
