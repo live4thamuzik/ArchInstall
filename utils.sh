@@ -715,7 +715,7 @@ secure_password_input() {
     while true; do
         read -rsp "$prompt_msg (min 8 chars): " "$result_var_name" # Direct expansion here
         echo
-        if [ -n "${!result_var_name}" ] && [ ${#result_var_name} -ge 8 ]; then # Check length of expanded value
+        if [ -n "${!result_var_name}" ] && [ ${#!result_var_name} -ge 8 ]; then # Check length of expanded value
             break
         else
             log_warn "Password too short or empty. Please enter at least 8 characters."
