@@ -15,51 +15,98 @@ source ./dialogs.sh
 # Associative arrays like PARTITION_UUIDs are also exported (-A).
 # So, they will be directly available in this script's scope.
 
-# Re-define basic logging functions to ensure they are available within this script's context.
-# These will override the log_* from utils.sh that might be sourced, but are safer for this context
-# and ensure consistency if utils.sh is modified.
-_log_info() { echo -e "\e[32m[INFO]\e[0m $(date +%T) $*"; }
-_log_warn() { echo -e "\e[33m[WARN]\e[0m $(date +%T) $*" >&2; }
-_log_error() { echo -e "\e[31m[ERROR]\e[0m $(date +%T) $*" >&2; exit 1; }
+# Enhanced logging functions for chroot context (based on revision 2 approach)
+_log_message() {
+    local level="$1"
+    local message="$2"
+    local exit_code="${3:-0}"
+    local timestamp
+    timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+    local caller_info="${FUNCNAME[2]:-main}:${BASH_LINENO[1]:-0}"
+    
+    # Determine log level color
+    local color=""
+    case "$level" in
+        INFO) color="\e[32m" ;;
+        WARN) color="\e[33m" ;;
+        ERROR) color="\e[31m" ;;
+        DEBUG) color="\e[36m" ;;
+        *) color="\e[0m" ;;
+    esac
+    
+    # Format log message
+    local log_entry="[$timestamp] [$level] [$caller_info] Exit Code: $exit_code - $message"
+    
+    # Print to terminal (with color)
+    echo -e "${color}${log_entry}\e[0m"
+    
+    # Append to log file if LOG_FILE is set
+    if [[ -n "${LOG_FILE:-}" ]]; then
+        echo "$log_entry" >> "$LOG_FILE"
+    fi
+}
+
+_log_info() { _log_message "INFO" "$1"; }
+_log_warn() { _log_message "WARN" "$1"; }
+_log_error() { _log_message "ERROR" "$1" "$?"; exit 1; }
+_log_debug() { _log_message "DEBUG" "$1"; }
 _log_success() { echo -e "\n\e[32;1m==================================================\e[0m\n\e[32;1m $* \e[0m\n\e[32;1m==================================================\e[0m\n"; }
 
 
 # Main function for chroot configuration - this is now the entry point for this script
+# Performs all post-installation configuration inside the chroot environment
+# Global: All configuration variables exported from install_arch.sh
 main_chroot_config() {
     _log_info "Starting chroot configurations within target system."
 
     # --- Phase 1: Basic System Configuration ---
-    _log_info "Configuring time, locale, hostname, and basic user setup."
+    _log_info "Configuring pacman for better user experience..."
+    configure_pacman_chroot || _log_error "Pacman configuration failed."
+    
+    _log_info "Configuring system localization..."
+    configure_localization_chroot || _log_error "Localization configuration failed."
 
-    _log_info "Setting system clock and timezone..."
-    ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime || _log_error "Failed to set timezone symlink."
-    hwclock --systohc || _log_error "Failed to sync hardware clock."
-
-    _log_info "Setting localization (locale, keymap)..."
-    echo "LANG=$LOCALE" > /etc/locale.conf || _log_error "Failed to set locale.conf."
-    sed -i "/^#$(echo "$LOCALE" | sed 's/\./\\./g')/s/^#//" /etc/locale.gen || _log_error "Failed to uncomment locale in locale.gen."
-    locale-gen || _log_error "Failed to generate locales."
-    echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf || _log_error "Failed to set vconsole.conf."
-
-    _log_info "Setting hostname and /etc/hosts..."
-    echo "$SYSTEM_HOSTNAME" > /etc/hostname || _log_error "Failed to set hostname."
-    echo "127.0.0.1 localhost" > /etc/hosts || _log_error "Failed to write to /etc/hosts."
-    echo "::1       localhost" >> /etc/hosts || _log_error "Failed to append to /etc/hosts."
-    echo "127.0.1.1 $SYSTEM_HOSTNAME.localdomain $SYSTEM_HOSTNAME" >> /etc/hosts || _log_error "Failed to append to /etc/hosts."
-    _log_info "/etc/hosts configured."
+    _log_info "Configuring hostname and basic user setup."
+    configure_hostname_chroot || _log_error "Hostname configuration failed."
 
     _log_info "Setting root password..."
-    echo "root:$ROOT_PASSWORD" | chpasswd || _log_error "Failed to set root password."
+    
+    # Ensure proper chroot environment setup for password operations
+    _log_info "Ensuring proper chroot environment for password operations..."
+    
+    # Mount necessary filesystems if not already mounted
+    if ! mountpoint -q /proc; then
+        mount -t proc proc /proc || _log_warn "Failed to mount /proc"
+    fi
+    if ! mountpoint -q /sys; then
+        mount -t sysfs sysfs /sys || _log_warn "Failed to mount /sys"
+    fi
+    if ! mountpoint -q /dev; then
+        mount --bind /dev /dev || _log_warn "Failed to bind mount /dev"
+    fi
+    
+    # Set up proper environment for PAM
+    export PAM_TTY="$(tty)"
+    export PAM_RHOST="localhost"
+    
+    set_password_chroot "root" "$ROOT_PASSWORD" || _log_error "Failed to set root password."
 
     _log_info "Creating main user: $MAIN_USERNAME..."
-    if id -u "$MAIN_USERNAME" &>/dev/null; then
-        _log_warn "User '$MAIN_USERNAME' already exists. Skipping user creation."
-    else
-        useradd -m -G wheel -s /bin/bash "$MAIN_USERNAME" || _log_error "Failed to create user '$MAIN_USERNAME'."
-        echo "$MAIN_USERNAME:$MAIN_USER_PASSWORD" | chpasswd || _log_error "Failed to set password for '$MAIN_USERNAME'."
-        echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel-sudo || _log_error "Failed to configure sudoers."
-        chmod 0440 /etc/sudoers.d/10-wheel-sudo || _log_error "Failed to set permissions on sudoers file."
+    
+    # Debug: Check if MAIN_USERNAME is set
+    if [ -z "$MAIN_USERNAME" ]; then
+        _log_error "MAIN_USERNAME is empty! Cannot create user."
+        _log_error "Available variables: ROOT_PASSWORD=${ROOT_PASSWORD:0:3}***, MAIN_USER_PASSWORD=${MAIN_USER_PASSWORD:0:3}***"
+        error_exit "MAIN_USERNAME variable is not set in chroot environment"
     fi
+    
+    # Create user using the proven approach from second revision
+    useradd -m -G wheel,power,storage,uucp,network -s /bin/bash "$MAIN_USERNAME" || _log_error "Failed to create user '$MAIN_USERNAME'."
+    set_password_chroot "$MAIN_USERNAME" "$MAIN_USER_PASSWORD" || _log_error "Failed to set password for '$MAIN_USERNAME'."
+    
+    # Configure sudoers (simplified approach)
+    echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel-sudo || _log_error "Failed to configure sudoers."
+    chmod 0440 /etc/sudoers.d/10-wheel-sudo || _log_error "Failed to set permissions on sudoers file."
 
     # --- Phase 2: Bootloader & Initramfs ---
     _log_info "Configuring bootloader, GRUB defaults, theme, and mkinitpio hooks."
@@ -67,37 +114,55 @@ main_chroot_config() {
 
     configure_grub_defaults_chroot || _log_error "GRUB default configuration failed."
 
-    configure_grub_theme_chroot || _log_error "GRUB theme configuration failed."
-
-    configure_grub_cmdline_chroot || _log_error "GRUB kernel command line configuration failed."
+    # Configure GRUB-specific options only if GRUB is selected
+    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
+        configure_grub_theme_chroot || _log_error "GRUB theme configuration failed."
+        configure_grub_cmdline_chroot || _log_error "GRUB kernel command line configuration failed."
+    else
+        _log_info "Skipping GRUB-specific configurations (systemd-boot selected)"
+    fi
 
     configure_mkinitpio_hooks_chroot || _log_error "Mkinitpio hooks configuration or initramfs rebuild failed."
+
+    # Configure Plymouth only if GRUB is selected (systemd-boot has limited Plymouth support)
+    if [ "$WANT_PLYMOUTH" == "yes" ]; then
+        if [ "$BOOTLOADER_TYPE" == "grub" ]; then
+            _log_info "Configuring Plymouth boot splash..."
+            configure_plymouth_chroot || _log_error "Plymouth configuration failed."
+        else
+            _log_warn "Plymouth requested but systemd-boot selected - limited Plymouth support"
+            _log_info "Configuring Plymouth boot splash..."
+            configure_plymouth_chroot || _log_error "Plymouth configuration failed."
+        fi
+    else
+        _log_info "Skipping Plymouth configuration (not requested)"
+    fi
+
+    _log_info "Configuring Secure Boot..."
+    configure_secure_boot_chroot || _log_error "Secure Boot configuration failed."
 
 
     # --- Phase 3: Desktop Environment & Drivers ---
     _log_info "Installing Desktop Environment: $DESKTOP_ENVIRONMENT..."
-    local de_packages=""
     case "$DESKTOP_ENVIRONMENT" in
-        "gnome") de_packages="${DESKTOP_ENVIRONMENTS_GNOME_PACKAGES[@]}" ;;
-        "kde") de_packages="${DESKTOP_ENVIRONMENTS_KDE_PACKAGES[@]}" ;;
-        "hyprland") de_packages="${DESKTOP_ENVIRONMENTS_HYPRLAND_PACKAGES[@]}" ;;
-        "none") de_packages="" ;;
+        "gnome") install_packages_chroot "${DESKTOP_ENVIRONMENTS_GNOME_PACKAGES[@]}" || _log_error "Desktop Environment packages installation failed." ;;
+        "kde") install_packages_chroot "${DESKTOP_ENVIRONMENTS_KDE_PACKAGES[@]}" || _log_error "Desktop Environment packages installation failed." ;;
+        "hyprland") install_packages_chroot "${DESKTOP_ENVIRONMENTS_HYPRLAND_PACKAGES[@]}" || _log_error "Desktop Environment packages installation failed." ;;
+        "none") _log_info "No desktop environment to install" ;;
     esac
-    if [[ -n "$de_packages" ]]; then
-        install_packages_chroot "$de_packages" || _log_error "Desktop Environment packages installation failed."
-    fi
 
     _log_info "Installing Display Manager: $DISPLAY_MANAGER..."
-    local dm_packages=""
     case "$DISPLAY_MANAGER" in
-        "gdm") dm_packages="${DISPLAY_MANAGERS_GDM_PACKAGES[@]}" ;;
-        "sddm") dm_packages="${DISPLAY_MANAGERS_SDDM_PACKAGES[@]}" ;;
-        "none") dm_packages="" ;;
+        "gdm") 
+            install_packages_chroot "${DISPLAY_MANAGERS_GDM_PACKAGES[@]}" || _log_error "Display Manager packages installation failed."
+            enable_systemd_service_chroot "$DISPLAY_MANAGER" || _log_error "Failed to enable Display Manager service."
+            ;;
+        "sddm") 
+            install_packages_chroot "${DISPLAY_MANAGERS_SDDM_PACKAGES[@]}" || _log_error "Display Manager packages installation failed."
+            enable_systemd_service_chroot "$DISPLAY_MANAGER" || _log_error "Failed to enable Display Manager service."
+            ;;
+        "none") _log_info "No display manager to install" ;;
     esac
-    if [[ -n "$dm_packages" ]]; then
-        install_packages_chroot "$dm_packages" || _log_error "Display Manager packages installation failed."
-        enable_systemd_service_chroot "$DISPLAY_MANAGER" || _log_error "Failed to enable Display Manager service."
-    fi
     
     _log_info "Installing GPU Drivers..."
     install_gpu_drivers_chroot || _log_error "GPU driver installation failed."
@@ -107,8 +172,7 @@ main_chroot_config() {
 
 
     # --- Phase 4: Optional Software & User Customization ---
-    _log_info "Enabling Multilib repository..."
-    enable_multilib_chroot || _log_error "Multilib repository configuration failed."
+    # Multilib repository is now handled in configure_pacman_chroot()
 
     _log_info "Installing AUR Helper..."
     install_aur_helper_chroot || _log_error "AUR Helper installation failed."
@@ -118,6 +182,9 @@ main_chroot_config() {
 
     _log_info "Installing Custom Packages..."
     install_custom_packages_chroot || _log_error "Custom packages installation failed."
+
+    _log_info "Installing Custom AUR Packages..."
+    install_custom_aur_packages_chroot || _log_error "Custom AUR packages installation failed."
 
     _log_info "Installing AUR Numlock on Boot..."
     configure_numlock_chroot || _log_error "Numlock on boot configuration failed."
@@ -131,6 +198,40 @@ main_chroot_config() {
     # --- Phase 5: Final System Services ---
     _log_info "Enabling essential system services..."
     enable_systemd_service_chroot "NetworkManager" || _log_error "Failed to enable NetworkManager service."
+    # Enable time synchronization service based on user choice
+    case "$TIME_SYNC_CHOICE" in
+        "ntpd")
+            enable_systemd_service_chroot "ntpd" || _log_error "Failed to enable ntpd service."
+            ;;
+        "chrony")
+            enable_systemd_service_chroot "chronyd" || _log_error "Failed to enable chronyd service."
+            ;;
+        "systemd-timesyncd")
+            enable_systemd_service_chroot "systemd-timesyncd" || _log_error "Failed to enable systemd-timesyncd service."
+            ;;
+    esac
+    enable_systemd_service_chroot "fstrim.timer" || _log_error "Failed to enable SSD trim timer."
+
+    # --- Phase 6: Btrfs Snapshot Configuration ---
+    _log_info "Configuring Btrfs snapshots..."
+    configure_btrfs_snapshots_chroot || _log_error "Btrfs snapshots configuration failed."
+
+    # --- Phase 7: Desktop Environment Configuration ---
+    _log_info "Configuring desktop environment and display manager..."
+    configure_desktop_environment_chroot || _log_error "Desktop environment configuration failed."
 
     _log_success "Chroot configuration complete."
+    
+    # Preserve logs in the chroot environment
+    if [[ -n "${LOG_FILE:-}" ]]; then
+        _log_info "Preserving chroot logs..."
+        mkdir -p "/var/log"
+        if [[ -f "$LOG_FILE" ]]; then
+            cp "$LOG_FILE" "/var/log/archinstall-chroot.log"
+            _log_info "Chroot logs preserved at: /var/log/archinstall-chroot.log"
+        fi
+    fi
 }
+
+# Call the main function
+main_chroot_config

@@ -13,18 +13,32 @@ source "$(dirname "${BASH_SOURCE[0]}")/disk_strategies.sh"
 
 # --- Main Installation Function ---
 main() {
+    # Initialize enhanced logging system
+    setup_logging
+    
     log_header "Arch Linux Automated Installer"
+    
+    # Show log access information at the start
+    show_log_access
 
     check_prerequisites || error_exit "Prerequisite check failed."
 
-    # Install reflector prerequisites and configure mirrors (always on Live ISO)
-    install_reflector_prereqs_live || error_exit "Live ISO prerequisites failed."
-    configure_mirrors_live "$REFLECTOR_COUNTRY_CODE" || error_exit "Mirror configuration failed."
+    # Verify ISO signature if requested
+    if [ "$VERIFY_ISO_SIGNATURE" == "yes" ]; then
+        verify_iso_signature || log_warn "ISO signature verification failed (continuing anyway)"
+    fi
 
     # Stage 1: Gather User Input (Always interactive now, no config loading)
     log_header "Stage 1: Gathering Installation Details"
     gather_installation_details || error_exit "Installation details gathering failed."
     display_summary_and_confirm || error_exit "Installation cancelled by user."
+    
+    # Configure mirrors using reflector AFTER user input (so user choices matter!)
+    log_info "Configuring mirrors based on user preferences..."
+    configure_mirrors_live "$REFLECTOR_COUNTRY_CODE" || error_exit "Mirror configuration failed."
+    
+    # Set console keymap for live environment
+    set_console_keymap_live
 
     # Stage 2: Disk Partitioning and Formatting
     log_header "Stage 2: Disk Partitioning and Formatting"
@@ -33,12 +47,19 @@ main() {
     # Stage 3: Base System Installation
     log_header "Stage 3: Installing Base System"
     install_base_system_target || error_exit "Base system installation failed."
+    
+    # Generate fstab
+    log_info "Generating fstab file..."
+    generate_fstab || error_exit "Fstab generation failed."
 
     # Stage 4: Chroot Configuration
     log_header "Stage 4: Post-Installation (Chroot) Configuration"
 
     log_info "Copying chroot configuration files to /mnt..."
     cp -v ./chroot_config.sh ./config.sh ./utils.sh ./disk_strategies.sh ./dialogs.sh /mnt || error_exit "Failed to copy all necessary scripts to chroot."
+    
+    log_info "Copying Source directory to /mnt..."
+    cp -r ./Source /mnt || error_exit "Failed to copy Source directory to chroot."
 
     # Verify the files exist at the destination
     if [ ! -f "/mnt/chroot_config.sh" ] || \
@@ -53,16 +74,25 @@ main() {
     chmod +x /mnt/*.sh || error_exit "Failed to make chroot scripts executable."
     
     log_info "Exporting variables for chroot environment..."
+    
+    # Debug: Show key variables before export
+    log_info "Debug - Key variables before export:"
+    log_info "  MAIN_USERNAME: '$MAIN_USERNAME'"
+    log_info "  ROOT_PASSWORD: '${ROOT_PASSWORD:0:3}***'"
+    log_info "  MAIN_USER_PASSWORD: '${MAIN_USER_PASSWORD:0:3}***'"
+    log_info "  SYSTEM_HOSTNAME: '$SYSTEM_HOSTNAME'"
+    
     export PARTITION_UUIDS_EFI_UUID PARTITION_UUIDS_EFI_PARTUUID PARTITION_UUIDS_ROOT_UUID PARTITION_UUIDS_BOOT_UUID PARTITION_UUIDS_SWAP_UUID PARTITION_UUIDS_HOME_UUID PARTITION_UUIDS_LUKS_CONTAINER_UUID PARTITION_UUIDS_LV_ROOT_UUID PARTITION_UUIDS_LV_SWAP_UUID PARTITION_UUIDS_LV_HOME_UUID
     export LUKS_CRYPTROOT_DEV LV_ROOT_PATH LV_SWAP_PATH LV_HOME_PATH VG_NAME
     export KERNEL_TYPE CPU_MICROCODE_TYPE TIMEZONE LOCALE KEYMAP REFLECTOR_COUNTRY_CODE SYSTEM_HOSTNAME
     export ROOT_PASSWORD MAIN_USERNAME MAIN_USER_PASSWORD
-    export DESKTOP_ENVIRONMENT DISPLAY_MANAGER GPU_DRIVER_TYPE BOOTLOADER_TYPE ENABLE_OS_PROBER
+    export DESKTOP_ENVIRONMENT DISPLAY_MANAGER GPU_DRIVER_TYPE BOOTLOADER_TYPE ENABLE_OS_PROBER WANT_SECURE_BOOT TIME_SYNC_CHOICE LOCALE KEYMAP TIMEZONE REFLECTOR_COUNTRY_CODE SYSTEM_HOSTNAME CPU_MICROCODE_TYPE VERIFY_ISO_SIGNATURE
     export WANT_MULTILIB WANT_AUR_HELPER AUR_HELPER_CHOICE WANT_FLATPAK
     export INSTALL_CUSTOM_PACKAGES CUSTOM_PACKAGES INSTALL_CUSTOM_AUR_PACKAGES CUSTOM_AUR_PACKAGES
-    export WANT_GRUB_THEME GRUB_THEME_CHOICE WANT_NUMLOCK_ON_BOOT
+    export WANT_GRUB_THEME GRUB_THEME_CHOICE WANT_NUMLOCK_ON_BOOT WANT_PLYMOUTH WANT_PLYMOUTH_THEME PLYMOUTH_THEME_CHOICE
     export WANT_DOTFILES_DEPLOYMENT DOTFILES_REPO_URL DOTFILES_BRANCH
     export WANT_LVM WANT_ENCRYPTION WANT_RAID RAID_LEVEL
+    export ROOT_FILESYSTEM_TYPE HOME_FILESYSTEM_TYPE WANT_BTRFS WANT_BTRFS_SNAPSHOTS WANT_BTRFS_ASSISTANT BTRFS_SNAPSHOT_FREQUENCY BTRFS_KEEP_SNAPSHOTS
     export -a RAID_DEVICES
 
     log_info "Executing chroot configuration script inside chroot..."
@@ -74,75 +104,181 @@ main() {
     final_cleanup || error_exit "Final cleanup failed."
 
     log_success "Arch Linux installation complete! You can now reboot."
+    
+    # Preserve logs for successful installation
+    preserve_logs "success"
+    
     prompt_reboot_system
 }
-# Helper function for base system installation
+
+# Error handling wrapper for the main function
+run_installation() {
+    # Set up error handling
+    set -e
+    trap 'handle_installation_error' ERR
+    trap 'handle_installation_interrupt' INT TERM
+    
+    # Run the main installation
+    main "$@"
+}
+
+# Error handler for installation failures
+handle_installation_error() {
+    local exit_code=$?
+    log_error "Installation failed with exit code: $exit_code"
+    
+    # Preserve logs for failed installation
+    preserve_logs "failure"
+    
+    # Show log access information
+    show_log_access
+    
+    echo ""
+    echo "❌ INSTALLATION FAILED"
+    echo "Check the logs above for details on what went wrong."
+    echo "Log files are preserved for troubleshooting."
+    echo ""
+    
+    exit $exit_code
+}
+
+# Interrupt handler for user cancellation
+handle_installation_interrupt() {
+    log_warn "Installation interrupted by user"
+    
+    # Preserve logs for interrupted installation
+    preserve_logs "interrupted"
+    
+    # Show log access information
+    show_log_access
+    
+    echo ""
+    echo "⚠️  INSTALLATION INTERRUPTED"
+    echo "Log files are preserved for troubleshooting."
+    echo ""
+    
+    exit 130
+}
+# Helper function for base system installation (simplified approach based on proven second revision)
 install_base_system_target() {
     log_info "Installing base system packages into /mnt..."
     
-    local packages_to_install=() # Initialize an array to hold all packages
-
-    # Add essential base packages
-    if [[ ${#BASE_PACKAGES_ESSENTIAL[@]} -gt 0 ]]; then
-        packages_to_install+=(${BASE_PACKAGES_ESSENTIAL[@]})
-    fi
-
-    local kernel_packages=()
+    # Start with essential packages (like second revision)
+    local base_packages="base expect"
+    
+    # Add kernel packages based on user choice
     if [ "$KERNEL_TYPE" == "linux" ]; then
-        kernel_packages+=(${BASE_PACKAGES_KERNEL_LINUX[@]})
+        base_packages="$base_packages linux linux-firmware linux-headers"
     elif [ "$KERNEL_TYPE" == "linux-lts" ]; then
-        kernel_packages+=(${BASE_PACKAGES_KERNEL_LTS[@]})
+        base_packages="$base_packages linux-lts linux-firmware linux-lts-headers"
     else
         error_exit "Unsupported KERNEL_TYPE: $KERNEL_TYPE."
     fi
-    if [[ ${#kernel_packages[@]} -gt 0 ]]; then
-        packages_to_install+=(${kernel_packages[@]})
+    
+    # Add essential system packages
+    base_packages="$base_packages base-devel networkmanager"
+    
+    # Add bootloader packages
+    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
+        base_packages="$base_packages grub efibootmgr os-prober"
+    elif [ "$BOOTLOADER_TYPE" == "systemd-boot" ]; then
+        base_packages="$base_packages systemd-boot"
     fi
     
-    # Add bootloader, network, and general system utilities
-    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
-        packages_to_install+=(${BASE_PACKAGES_BOOTLOADER_GRUB[@]})
+    # Add filesystem utilities
+    if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ] || [ "$HOME_FILESYSTEM_TYPE" == "btrfs" ]; then
+        base_packages="$base_packages btrfs-progs"
+        WANT_BTRFS="yes"
     fi
-    if [ "$BOOTLOADER_TYPE" == "systemd-boot" ]; then
-        packages_to_install+=(${BASE_PACKAGES_BOOTLOADER_SYSTEMDBOOT[@]})
+    if [ "$ROOT_FILESYSTEM_TYPE" == "ext4" ] || [ "$HOME_FILESYSTEM_TYPE" == "ext4" ]; then
+        base_packages="$base_packages e2fsprogs"
     fi
-    packages_to_install+=(${BASE_PACKAGES_NETWORK[@]})
-    packages_to_install+=(${BASE_PACKAGES_SYSTEM_UTILS[@]})
-
-    # Install LVM/RAID tools if chosen
+    if [ "$ROOT_FILESYSTEM_TYPE" == "xfs" ] || [ "$HOME_FILESYSTEM_TYPE" == "xfs" ]; then
+        base_packages="$base_packages xfsprogs"
+    fi
+    
+    # Add LVM/RAID tools if needed
     if [ "$WANT_LVM" == "yes" ]; then
-        packages_to_install+=(${BASE_PACKAGES_LVM[@]})
+        base_packages="$base_packages lvm2"
     fi
     if [ "$WANT_RAID" == "yes" ]; then
-        packages_to_install+=(${BASE_PACKAGES_RAID[@]})
+        base_packages="$base_packages mdadm"
     fi
     
-    # Add Filesystem utilities based on user choice
-    if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ]; then
-        packages_to_install+=(${BASE_PACKAGES_FS_BTRFS[@]})
-    elif [ "$ROOT_FILESYSTEM_TYPE" == "xfs" ]; then
-        packages_to_install+=(${BASE_PACKAGES_FS_XFS[@]})
+    # Add CPU microcode
+    if [ "$CPU_MICROCODE_TYPE" == "intel" ]; then
+        base_packages="$base_packages intel-ucode"
+    elif [ "$CPU_MICROCODE_TYPE" == "amd" ]; then
+        base_packages="$base_packages amd-ucode"
     fi
     
-    if [ "$WANT_HOME_PARTITION" == "yes" ]; then
-        if [ "$HOME_FILESYSTEM_TYPE" == "btrfs" ]; then
-            packages_to_install+=(${BASE_PACKAGES_FS_BTRFS[@]})
-        elif [ "$HOME_FILESYSTEM_TYPE" == "xfs" ]; then
-            packages_to_install+=(${BASE_PACKAGES_FS_XFS[@]})
-        fi
+    # Add time sync packages
+    case "$TIME_SYNC_CHOICE" in
+        "ntpd")
+            base_packages="$base_packages ntp"
+            ;;
+        "chrony")
+            base_packages="$base_packages chrony"
+            ;;
+        "systemd-timesyncd")
+            base_packages="$base_packages systemd-timesyncd"
+            ;;
+    esac
+    
+    # Add Btrfs snapshot packages if requested
+    if [ "$WANT_BTRFS" == "yes" ] && [ "$WANT_BTRFS_SNAPSHOTS" == "yes" ]; then
+        base_packages="$base_packages snapper grub-btrfs"
     fi
     
-    if [ ${#packages_to_install[@]} -eq 0 ]; then
-        error_exit "No packages compiled for base system installation. This should not happen."
+    # Add desktop environment packages
+    case "$DESKTOP_ENVIRONMENT" in
+        "gnome")
+            base_packages="$base_packages gnome gnome-extra gnome-tweaks firefox"
+            ;;
+        "kde")
+            base_packages="$base_packages plasma-desktop sddm kde-applications dolphin firefox"
+            ;;
+        "hyprland")
+            base_packages="$base_packages hyprland waybar swww kitty firefox"
+            ;;
+        "none")
+            # No desktop environment packages
+            ;;
+    esac
+    
+    # Add display manager packages
+    case "$DISPLAY_MANAGER" in
+        "gdm")
+            base_packages="$base_packages gdm"
+            ;;
+        "sddm")
+            base_packages="$base_packages sddm"
+            ;;
+        "none")
+            # No display manager packages
+            ;;
+    esac
+    
+    # Add other essential packages
+    base_packages="$base_packages sudo man-db man-pages vim nano bash-completion git curl"
+    
+    # Add Plymouth if requested
+    if [ "$WANT_PLYMOUTH" == "yes" ]; then
+        base_packages="$base_packages plymouth"
     fi
-
-    run_pacstrap_base_install "${packages_to_install[@]}" || error_exit "Base system installation failed."
-
-    generate_fstab # Call the fstab generation after base install, before chroot.
+    
+    # Add Secure Boot tools if requested
+    if [ "$WANT_SECURE_BOOT" == "yes" ]; then
+        base_packages="$base_packages sbctl"
+    fi
+    
+    log_info "Installing packages: $base_packages"
+    
+    # Use the proven approach from second revision
+    pacstrap -K /mnt $base_packages --noconfirm --needed || error_exit "Pacstrap failed to install base system."
 
     log_info "Base system installation complete on target."
 }
 
-# --- Call the main function ---
-main "$@"
-}
+# --- Call the main function with error handling ---
+run_installation "$@"

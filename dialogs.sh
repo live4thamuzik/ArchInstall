@@ -355,798 +355,29 @@ gather_installation_details() {
         fi
     fi
 
-
-    log_header "BASE SYSTEM & USER CONFIGURATION"
-
-    # Kernel Type (rolling vs. LTS).
-    select_option "Choose your preferred kernel:" KERNEL_TYPES_OPTIONS KERNEL_TYPE
-    if [ "$?" -ne 0 ]; then
-        error_exit "Kernel type selection failed."
-    fi
-
-    # Timezone Configuration.
-    log_info "Configuring system timezone."
-    local selected_region=""
-    select_option "Select your primary geographical region:" TIMEZONE_REGIONS selected_region
-    if [ "$?" -ne 0 ]; then
-        error_exit "Timezone region selection failed."
-    fi
-
-    local proposed_timezone_examples=""
-    case "$selected_region" in
-        "America") proposed_timezone_examples="e.g., America/New_York, America/Chicago, America/Los_Angeles";;
-        "Europe")  proposed_timezone_examples="e.g., Europe/London, Europe/Berlin, Europe/Paris";;
-        "Asia")    proposed_timezone_examples="e.g., Asia/Tokyo, Asia/Shanghai, Asia/Kolkata";;
-        "Australia") proposed_timezone_examples="e.g., Australia/Sydney, Australia/Perth";;
-        # Add more examples for other regions if desired
-        *) proposed_timezone_examples="e.g., $selected_region/CityName";;
-    esac
-
-    local chosen_timezone_input=""
-    while true; do
-        read -rp "Enter specific city/timezone (e.g., ${selected_region}/CityName, $proposed_timezone_examples): " chosen_timezone_input
-        chosen_timezone_input=$(trim_string "$chosen_timezone_input")
-
-        if [ -f "/usr/share/zoneinfo/$chosen_timezone_input" ]; then
-            TIMEZONE="$chosen_timezone_input"
-            break
-        else
-            log_warn "Timezone '$chosen_timezone_input' not found or is invalid. Please try again."
-            local list_all_timezones=""
-            prompt_yes_no "Do you want to see a list of ALL timezones in '$selected_region'?" list_all_timezones
-            if [ "$list_all_timezones" == "yes" ]; then
-                log_info "Listing all timezones in '$selected_region':"
-                local all_timezones_in_region=($(get_timezones_in_region "$selected_region"))
-                if [ ${#all_timezones_in_region[@]} -gt 0 ]; then
-                    printf '%s\n' "${all_timezones_in_region[@]}"
-                else
-                    log_warn "No timezones found for this region, this should not happen. Please check /usr/share/zoneinfo."
-                fi
-                log_info "Please copy the exact timezone name from the list and re-enter above."
-            fi
-        fi
-    done
-    log_info "System timezone set to: $TIMEZONE"
-
-    # Localization (Locale & Keymap).
-    log_info "Setting system locale."
-    select_option "Select primary system locale:" LOCALE_OPTIONS LOCALE
-    if [ "$?" -ne 0 ]; then # Check for select_option failure
-        error_exit "Locale selection failed."
-    fi
-
-    log_info "Setting console keymap."
-    select_option "Select console keymap:" KEYMAP_OPTIONS KEYMAP
-    if [ "$?" -ne 0 ]; then # Check for select_option failure
-        error_exit "Keymap selection failed."
-    fi
-
-    # Reflector Country Code (Mirrorlist).
-    log_info "Configuring pacman mirror country."
-    local use_default_mirror_country=""
-    prompt_yes_no "Use default mirror country (${REFLECTOR_COUNTRY_CODE})? " use_default_mirror_country
-
-    if [ "$use_default_mirror_country" == "no" ]; then
-        log_info "Available common countries for reflector:"
-        local temp_reflector_country_choice=""
-        select_option "Select preferred mirror country code:" REFLECTOR_COMMON_COUNTRIES temp_reflector_country_choice
-        if [ "$?" -ne 0 ]; then # Check for select_option failure
-            error_exit "Mirror country selection failed."
-        fi
-        REFLECTOR_COUNTRY_CODE="$temp_reflector_country_choice"
-        if [ -z "$REFLECTOR_COUNTRY_CODE" ]; then
-            log_warn "No country code selected. Sticking with default: US"
-            REFLECTOR_COUNTRY_CODE="US"
-        fi
-    fi
-
-    log_header "DESKTOP & USER ACCOUNT CONFIGURATION"
-
-    # User Credentials.
-    read -rp "Enter hostname: " SYSTEM_HOSTNAME
-    secure_password_input "Enter root password: " ROOT_PASSWORD
-    read -rp "Enter main username: " MAIN_USERNAME
-    secure_password_input "Enter password for $MAIN_USERNAME: " MAIN_USER_PASSWORD
-
-    # Desktop Environment and Display Manager.
-    select_option "Select Desktop Environment:" DESKTOP_ENVIRONMENTS_OPTIONS DESKTOP_ENVIRONMENT
-    if [ "$?" -ne 0 ]; then # Check for select_option failure
-        error_exit "Desktop Environment selection failed."
-    fi
-    if [ "$DESKTOP_ENVIRONMENT" != "none" ]; then
-        case "$DESKTOP_ENVIRONMENT" in
-            gnome) DISPLAY_MANAGER="gdm";;
-            kde|hyprland) DISPLAY_MANAGER="sddm";;
-            * ) DISPLAY_MANAGER="none";;
-        esac
-        select_option "Select Display Manager (default: $DISPLAY_MANAGER):" DISPLAY_MANAGER_OPTIONS DISPLAY_MANAGER
-        if [ "$?" -ne 0 ]; then # Check for select_option failure
-            error_exit "Display Manager selection failed."
-        fi
-    else
-        DISPLAY_MANAGER="none"
-    fi
-
-    # Bootloader.
-    select_option "Select Bootloader:" BOOTLOADER_TYPES_OPTIONS BOOTLOADER_TYPE
-    if [ "$?" -ne 0 ]; then # Check for select_option failure
-        error_exit "Bootloader selection failed."
-    fi
-    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
-        prompt_yes_no "Enable OS Prober for dual-boot detection (recommended for dual-boot systems)?" ENABLE_OS_PROBER
-    fi
-
-    # Multilib Support (32-bit).
-    prompt_yes_no "Enable 32-bit support (multilib repository)?" WANT_MULTILIB
-
-    # AUR Helper.
-    prompt_yes_no "Install an AUR helper (e.g., yay)?" WANT_AUR_HELPER
-    if [ "$WANT_AUR_HELPER" == "yes" ]; then
-        select_option "Select AUR Helper:" AUR_HELPERS_OPTIONS AUR_HELPER_CHOICE
-        if [ "$?" -ne 0 ]; then # Check for select_option failure
-            error_exit "AUR Helper selection failed."
-        fi
-    fi
-
-    # Flatpak Support.
-    prompt_yes_no "Install Flatpak support?" WANT_FLATPAK
-
-    # Custom Packages (from config.sh).
-    prompt_yes_no "Do you want to install additional custom packages from the list in config.sh?" INSTALL_CUSTOM_PACKAGES
-
-    # Custom AUR Packages (from config.sh).
-    if [ "$WANT_AUR_HELPER" == "yes" ]; then
-        prompt_yes_no "Do you want to install additional custom AUR packages from the list in config.sh?" INSTALL_CUSTOM_AUR_PACKAGES
-    fi
-
-    # GRUB Theming.
-    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
-        prompt_yes_no "Install a GRUB theme?" WANT_GRUB_THEME
-        if [ "$WANT_GRUB_THEME" == "yes" ]; then
-            select_option "Select GRUB Theme:" GRUB_THEME_OPTIONS GRUB_THEME_CHOICE
-            if [ "$?" -ne 0 ]; then # Check for select_option failure
-                error_exit "GRUB Theme selection failed."
-            fi
-        fi
-    fi
-
-    # Numlock on Boot.
-    prompt_yes_no "Enable Numlock on boot?" WANT_NUMLOCK_ON_BOOT
-
-    # Dotfile Deployment.
-    prompt_yes_no "Do you want to deploy dotfiles from a Git repository?" WANT_DOTFILES_DEPLOYMENT
-    if [ "$WANT_DOTFILES_DEPLOYMENT" == "yes" ]; then
-        read -rp "Enter the Git repository URL for your dotfiles: " DOTFILES_REPO_URL
-        read -rp "Enter the branch to clone (default: main): " DOTFILES_BRANCH_INPUT
-        if [ -z "$DOTFILES_BRANCH_INPUT" ]; then
-            DOTFILES_BRANCH="main"
-        else
-            DOTFILES_BRANCH="$DOTFILES_BRANCH_INPUT"
-        fi
-    fi
-
-    log_info "All installation details gathered."
-}
-
-# --- Summary and Confirmation ---
-display_summary_and_confirm() {
-    log_header "Installation Summary"
-    echo "  Disk:                 $INSTALL_DISK"
-    echo "  Boot Mode:            $BOOT_MODE"
-    echo "  Partitioning:         $PARTITION_SCHEME"
-    echo "    Root FS Type:       $ROOT_FILESYSTEM_TYPE"
-    if [ "$WANT_HOME_PARTITION" == "yes" ]; then
-        echo "    Home FS Type:       $HOME_FILESYSTEM_TYPE"
-    fi
-    echo "    Swap:               $WANT_SWAP"
-    echo "    /home:              $WANT_HOME_PARTITION"
-    echo "    Encryption:         $WANT_ENCRYPTION"
-    if [ "$WANT_ENCRYPTION" == "yes" ]; then
-        echo "    LUKS Passphrase:    ***ENCRYPTED***"
-    fi
-    echo "    LVM:                $WANT_LVM"
-    if [ "$WANT_RAID" == "yes" ]; then
-        echo "    RAID Level:         $RAID_LEVEL"
-        echo "    RAID Disks:         ${RAID_DEVICES[*]}"
-    fi
-    echo "  Kernel:               $KERNEL_TYPE"
-    echo "  CPU Microcode:        $CPU_MICROCODE_TYPE (auto-installed)"
-    echo "  Timezone:             $TIMEZONE"
-    echo "  Locale:               $LOCALE"
-    echo "  Keymap:               $KEYMAP"
-    echo "  Reflector Country:    $REFLECTOR_COUNTRY_CODE"
-    echo "  Hostname:             $SYSTEM_HOSTNAME"
-    echo "  Main User:            $MAIN_USERNAME"
-    echo "  Desktop Env:          $DESKTOP_ENVIRONMENT"
-    echo "  Display Manager:      $DISPLAY_MANAGER"
-    echo "  GPU Driver:           $GPU_DRIVER_TYPE (auto-installed)"
-    echo "  Bootloader:           $BOOTLOADER_TYPE"
-    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
-        echo "    OS Prober:          $ENABLE_OS_PROBER"
-        if [ "$WANT_GRUB_THEME" == "yes" ]; then
-            echo "    GRUB Theme:         $GRUB_THEME_CHOICE"
-        fi
-    fi
-    echo "  Multilib:             $WANT_MULTILIB"
-    echo "  AUR Helper:           $WANT_AUR_HELPER"
-    if [ "$WANT_AUR_HELPER" == "yes" ]; then
-        echo "    AUR Helper Type:    $AUR_HELPER_CHOICE"
-    fi
-    echo "  Flatpak:              $WANT_FLATPAK"
-    echo "  Custom Packages:      $INSTALL_CUSTOM_PACKAGES"
-    if [ "$INSTALL_CUSTOM_PACKAGES" == "yes" ]; then
-        echo "    List:               See config.sh"
-    fi
-    echo "  Custom AUR Packages:  $INSTALL_CUSTOM_AUR_PACKAGES"
-    if [ "$INSTALL_CUSTOM_AUR_PACKAGES" == "yes" ]; then
-        echo "    List:               See config.sh"
-    fi
-    echo "  Numlock on Boot:      $WANT_NUMLOCK_ON_BOOT"
-    echo "  Dotfiles Deployment:  $WANT_DOTFILES_DEPLOYMENT"
-    if [ "$WANT_DOTFILES_DEPLOYMENT" == "yes" ]; then
-        echo "    Repo URL:           $DOTFILES_REPO_URL"
-        echo "    Branch:             $DOTFILES_BRANCH"
-    fi
-
-    prompt_yes_no "Do you want to proceed with the installation (THIS WILL WIPE $INSTALL_DISK)? " CONFIRM_INSTALL
-    if [ "$CONFIRM_INSTALL" == "no" ]; then
-        return 1
-    fi
-    return 0
-}
-
-prompt_reboot_system() {
-    prompt_yes_no "Installation complete. Reboot now?" REBOOT_NOW
-    if [ "$REBOOT_NOW" == "yes" ]; then
-        log_info "Rebooting..."
-        reboot
-    else
-        log_info "Please reboot manually when ready. Exiting."
-    fi
-}
-
-
-gather_installation_details() {
-    log_header "SYSTEM & STORAGE CONFIGURATION"
-
-    # Wi-Fi Connection (early, as it might be needed for reflector prereqs)
-    prompt_yes_no "Do you want to connect to a Wi-Fi network now?" WANT_WIFI_CONNECTION
-    if [ "$WANT_WIFI_CONNECTION" == "yes" ]; then
-        configure_wifi_live_dialog || error_exit "Wi-Fi connection setup failed. Cannot proceed without internet."
-    fi
-
-    # Auto-detect boot mode, allow override for BIOS.
-    log_info "Detecting system boot mode."
-    if [ -d "/sys/firmware/efi" ]; then # Bash 3.x does not support [[ -d /sys/firmware/efi ]] for directory check
-        BOOT_MODE="uefi"
-        log_info "Detected UEFI boot mode."
-
-        local fw_platform_size_file="/sys/firmware/efi/fw_platform_size"
-        if [ -f "$fw_platform_size_file" ]; then
-            local uefi_bitness=$(cat "$fw_platform_size_file")
-            if [ "$uefi_bitness" == "32" ]; then
-                error_exit "Detected 32-bit UEFI firmware. Arch Linux x86_64 requires 64-bit UEFI or BIOS boot mode. Please switch to BIOS/Legacy boot in your firmware settings or perform a manual installation."
-            fi
-            log_info "Detected ${uefi_bitness}-bit UEFI firmware." # Bash 3.x doesn't support ${var^^}
-        else
-            log_warn "Could not determine UEFI firmware bitness (missing $fw_platform_size_file)."
-            log_warn "Proceeding assuming 64-bit UEFI, but manual verification is recommended if issues arise."
-        fi
-
-        prompt_yes_no "Force BIOS/Legacy boot mode instead of UEFI?" OVERRIDE_BOOT_MODE
-        if [ "$OVERRIDE_BOOT_MODE" == "yes" ]; then
-            BOOT_MODE="bios"
-            log_warn "Forcing BIOS/Legacy boot mode."
-        fi
-    else
-        BOOT_MODE="bios"
-        log_info "Detected BIOS/Legacy boot mode."
-    fi
-
-    # Select primary installation disk.
-    local available_disks=($(get_available_disks))
-    if [ ${#available_disks[@]} -eq 0 ]; then
-        error_exit "No suitable disks found for installation. Exiting."
-    fi
-    select_option "Select the primary installation disk:" available_disks INSTALL_DISK
-
-    # Select partitioning scheme.
-    local scheme_options=("auto_simple" "auto_luks_lvm")
-    local other_disks_for_raid=()
-    for d in "${available_disks[@]}"; do
-        if [ "$d" != "$INSTALL_DISK" ]; then
-            other_disks_for_raid+=("$d")
-        fi
-    done
-
-    if [ ${#other_disks_for_raid[@]} -ge 1 ]; then
-        scheme_options+=("auto_raid_luks_lvm")
-    else
-        log_warn "Not enough additional disks for RAID options. Skipping RAID schemes."
-    fi
-    scheme_options+=("manual")
-
-    select_option "Select partitioning scheme:" scheme_options PARTITION_SCHEME
-
-    # Conditional prompts based on selected scheme.
-    case "$PARTITION_SCHEME" in
-        auto_simple)
-            WANT_ENCRYPTION="no"
-            WANT_LVM="no"
-            WANT_RAID="no"
-            prompt_yes_no "Do you want a swap partition?" WANT_SWAP
-            prompt_yes_no "Do you want a separate /home partition?" WANT_HOME_PARTITION
-            ;;
-        auto_luks_lvm)
-            WANT_ENCRYPTION="yes"
-            WANT_LVM="yes"
-            WANT_RAID="no"
-            prompt_yes_no "Do you want a swap Logical Volume?" WANT_SWAP
-            prompt_yes_no "Do you want a separate /home Logical Volume?" WANT_HOME_PARTITION
-            secure_password_input "Enter LUKS encryption passphrase: " LUKS_PASSPHRASE
-            ;;
-        auto_raid_luks_lvm)
-            WANT_RAID="yes"
-            WANT_ENCRYPTION="yes"
-            WANT_LVM="yes"
-
-            log_warn "RAID device selection requires additional disks. You must select them now."
-            log_info "Available additional disks for RAID:"
-            local i=1
-            local display_other_disks=()
-            for d in "${other_disks_for_raid[@]}"; do
-                display_other_disks+=("($i) $d")
-                i=$((i+1))
-            done
-            select_option "Select additional disk(s) for RAID (space-separated numbers, e.g., '1 3'):" display_other_disks selected_raid_disk_numbers_str
-
-            IFS=' ' read -r -a selected_nums_array <<< "$(trim_string "$selected_raid_disk_numbers_str")"
+    # Btrfs Snapshot Configuration
+    if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ] || [ "$HOME_FILESYSTEM_TYPE" == "btrfs" ]; then
+        log_info "Btrfs filesystem detected. Configuring snapshot options."
+        
+        prompt_yes_no "Do you want to enable automatic Btrfs snapshots?" WANT_BTRFS_SNAPSHOTS
+        if [ "$WANT_BTRFS_SNAPSHOTS" == "yes" ]; then
+            log_info "Btrfs snapshots provide system recovery capabilities and automatic backups."
+            log_info "This will install snapper and grub-btrfs for snapshot management."
             
-            RAID_DEVICES=("$INSTALL_DISK")
-            for num_str in "${selected_nums_array[@]}"; do
-                local index=$((num_str - 1))
-                if (( index >= 0 && index < ${#other_disks_for_raid[@]} )); then
-                    RAID_DEVICES+=("${other_disks_for_raid[$index]}")
-                else
-                    log_warn "Invalid RAID disk number: $num_str. Skipping."
-                fi
-            done
-            if [ ${#RAID_DEVICES[@]} -lt 2 ]; then error_exit "RAID requires at least 2 disks. Please re-run and select more."; fi
-
-            select_option "Select RAID level:" RAID_LEVEL_OPTIONS RAID_LEVEL
-            prompt_yes_no "Do you want a swap Logical Volume?" WANT_SWAP
-            prompt_yes_no "Do you want a separate /home Logical Volume?" WANT_HOME_PARTITION
-            secure_password_input "Enter LUKS encryption passphrase: " LUKS_PASSPHRASE
-            ;;
-        manual)
-            log_warn "Manual partitioning selected. You will be guided to perform partitioning steps yourself."
-            log_warn "Ensure you create and mount /mnt, /mnt/boot (and /mnt/boot/efi if UEFI) correctly."
-            WANT_SWAP="no"
-            WANT_HOME_PARTITION="no"
-            WANT_ENCRYPTION="no"
-            WANT_LVM="no"
-            WANT_RAID="no"
-            ;;
-    esac
-
-    # Filesystem Type Selection (for Root and Home if applicable)
-    if [ "$PARTITION_SCHEME" != "manual" ]; then
-        log_info "Configuring filesystem types for root and home partitions."
-        select_option "Select filesystem for the root (/) partition:" FILESYSTEM_OPTIONS ROOT_FILESYSTEM_TYPE
-        if [ "$?" -ne 0 ]; then
-            error_exit "Root filesystem selection failed."
-        fi
-
-        if [ "$WANT_HOME_PARTITION" == "yes" ]; then
-            local default_home_fs_choice="$ROOT_FILESYSTEM_TYPE"
-            select_option "Select filesystem for the /home partition (default: $default_home_fs_choice):" FILESYSTEM_OPTIONS HOME_FILESYSTEM_TYPE_TEMP
-            if [ "$?" -ne 0 ]; then
-                error_exit "Home filesystem selection failed."
-            fi
-            if [ -z "$HOME_FILESYSTEM_TYPE_TEMP" ]; then
-                HOME_FILESYSTEM_TYPE="$default_home_fs_choice"
-            else
-                HOME_FILESYSTEM_TYPE="$HOME_FILESYSTEM_TYPE_TEMP"
-            fi
-        fi
-    fi
-
-
-    log_header "BASE SYSTEM & USER CONFIGURATION"
-
-    # Kernel Type (rolling vs. LTS).
-    select_option "Choose your preferred kernel:" KERNEL_TYPES_OPTIONS KERNEL_TYPE
-    if [ "$?" -ne 0 ]; then
-        error_exit "Kernel type selection failed."
-    fi
-
-    # Timezone Configuration.
-    log_info "Configuring system timezone."
-    local selected_region=""
-    select_option "Select your primary geographical region:" TIMEZONE_REGIONS selected_region
-    if [ "$?" -ne 0 ]; then
-        error_exit "Timezone region selection failed."
-    fi
-
-    local proposed_timezone_examples=""
-    case "$selected_region" in
-        "America") proposed_timezone_examples="e.g., America/New_York, America/Chicago, America/Los_Angeles";;
-        "Europe")  proposed_timezone_examples="e.g., Europe/London, Europe/Berlin, Europe/Paris";;
-        "Asia")    proposed_timezone_examples="e.g., Asia/Tokyo, Asia/Shanghai, Asia/Kolkata";;
-        "Australia") proposed_timezone_examples="e.g., Australia/Sydney, Australia/Perth";;
-        # Add more examples for other regions if desired
-        *) proposed_timezone_examples="e.g., $selected_region/CityName";;
-    esac
-
-    local chosen_timezone_input=""
-    while true; do
-        read -rp "Enter specific city/timezone (e.g., ${selected_region}/CityName, $proposed_timezone_examples): " chosen_timezone_input
-        chosen_timezone_input=$(trim_string "$chosen_timezone_input")
-
-        if [ -f "/usr/share/zoneinfo/$chosen_timezone_input" ]; then
-            TIMEZONE="$chosen_timezone_input"
-            break
-        else
-            log_warn "Timezone '$chosen_timezone_input' not found or is invalid. Please try again."
-            local list_all_timezones=""
-            prompt_yes_no "Do you want to see a list of ALL timezones in '$selected_region'?" list_all_timezones
-            if [ "$list_all_timezones" == "yes" ]; then
-                log_info "Listing all timezones in '$selected_region':"
-                local all_timezones_in_region=($(get_timezones_in_region "$selected_region"))
-                if [ ${#all_timezones_in_region[@]} -gt 0 ]; then
-                    printf '%s\n' "${all_timezones_in_region[@]}"
-                else
-                    log_warn "No timezones found for this region, this should not happen. Please check /usr/share/zoneinfo."
-                fi
-                log_info "Please copy the exact timezone name from the list and re-enter above."
-            fi
-        fi
-    done
-    log_info "System timezone set to: $TIMEZONE"
-
-    # Localization (Locale & Keymap).
-    log_info "Setting system locale."
-    select_option "Select primary system locale:" LOCALE_OPTIONS LOCALE
-    if [ "$?" -ne 0 ]; then # Check for select_option failure
-        error_exit "Locale selection failed."
-    fi
-
-    log_info "Setting console keymap."
-    select_option "Select console keymap:" KEYMAP_OPTIONS KEYMAP
-    if [ "$?" -ne 0 ]; then # Check for select_option failure
-        error_exit "Keymap selection failed."
-    fi
-
-    # Reflector Country Code (Mirrorlist).
-    log_info "Configuring pacman mirror country."
-    local use_default_mirror_country=""
-    prompt_yes_no "Use default mirror country (${REFLECTOR_COUNTRY_CODE})? " use_default_mirror_country
-
-    if [ "$use_default_mirror_country" == "no" ]; then
-        log_info "Available common countries for reflector:"
-        local temp_reflector_country_choice=""
-        select_option "Select preferred mirror country code:" REFLECTOR_COMMON_COUNTRIES temp_reflector_country_choice
-        if [ "$?" -ne 0 ]; then # Check for select_option failure
-            error_exit "Mirror country selection failed."
-        fi
-        REFLECTOR_COUNTRY_CODE="$temp_reflector_country_choice"
-        if [ -z "$REFLECTOR_COUNTRY_CODE" ]; then
-            log_warn "No country code selected. Sticking with default: US"
-            REFLECTOR_COUNTRY_CODE="US"
-        fi
-    fi
-
-    log_header "DESKTOP & USER ACCOUNT CONFIGURATION"
-
-    # User Credentials.
-    read -rp "Enter hostname: " SYSTEM_HOSTNAME
-    secure_password_input "Enter root password: " ROOT_PASSWORD
-    read -rp "Enter main username: " MAIN_USERNAME
-    secure_password_input "Enter password for $MAIN_USERNAME: " MAIN_USER_PASSWORD
-
-    # Desktop Environment and Display Manager.
-    select_option "Select Desktop Environment:" DESKTOP_ENVIRONMENTS_OPTIONS DESKTOP_ENVIRONMENT
-    if [ "$?" -ne 0 ]; then # Check for select_option failure
-        error_exit "Desktop Environment selection failed."
-    fi
-    if [ "$DESKTOP_ENVIRONMENT" != "none" ]; then
-        case "$DESKTOP_ENVIRONMENT" in
-            gnome) DISPLAY_MANAGER="gdm";;
-            kde|hyprland) DISPLAY_MANAGER="sddm";;
-            * ) DISPLAY_MANAGER="none";;
-        esac
-        select_option "Select Display Manager (default: $DISPLAY_MANAGER):" DISPLAY_MANAGER_OPTIONS DISPLAY_MANAGER
-        if [ "$?" -ne 0 ]; then # Check for select_option failure
-            error_exit "Display Manager selection failed."
-        fi
-    else
-        DISPLAY_MANAGER="none"
-    fi
-
-    # Bootloader.
-    select_option "Select Bootloader:" BOOTLOADER_TYPES_OPTIONS BOOTLOADER_TYPE
-    if [ "$?" -ne 0 ]; then # Check for select_option failure
-        error_exit "Bootloader selection failed."
-    fi
-    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
-        prompt_yes_no "Enable OS Prober for dual-boot detection (recommended for dual-boot systems)?" ENABLE_OS_PROBER
-    fi
-
-    # Multilib Support (32-bit).
-    prompt_yes_no "Enable 32-bit support (multilib repository)?" WANT_MULTILIB
-
-    # AUR Helper.
-    prompt_yes_no "Install an AUR helper (e.g., yay)?" WANT_AUR_HELPER
-    if [ "$WANT_AUR_HELPER" == "yes" ]; then
-        select_option "Select AUR Helper:" AUR_HELPERS_OPTIONS AUR_HELPER_CHOICE
-        if [ "$?" -ne 0 ]; then # Check for select_option failure
-            error_exit "AUR Helper selection failed."
-        fi
-    fi
-
-    # Flatpak Support.
-    prompt_yes_no "Install Flatpak support?" WANT_FLATPAK
-
-    # Custom Packages (from config.sh).
-    prompt_yes_no "Do you want to install additional custom packages from the list in config.sh?" INSTALL_CUSTOM_PACKAGES
-
-    # Custom AUR Packages (from config.sh).
-    if [ "$WANT_AUR_HELPER" == "yes" ]; then
-        prompt_yes_no "Do you want to install additional custom AUR packages from the list in config.sh?" INSTALL_CUSTOM_AUR_PACKAGES
-    fi
-
-    # GRUB Theming.
-    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
-        prompt_yes_no "Install a GRUB theme?" WANT_GRUB_THEME
-        if [ "$WANT_GRUB_THEME" == "yes" ]; then
-            select_option "Select GRUB Theme:" GRUB_THEME_OPTIONS GRUB_THEME_CHOICE
-            if [ "$?" -ne 0 ]; then # Check for select_option failure
-                error_exit "GRUB Theme selection failed."
-            fi
-        fi
-    fi
-
-    # Numlock on Boot.
-    prompt_yes_no "Enable Numlock on boot?" WANT_NUMLOCK_ON_BOOT
-
-    # Dotfile Deployment.
-    prompt_yes_no "Do you want to deploy dotfiles from a Git repository?" WANT_DOTFILES_DEPLOYMENT
-    if [ "$WANT_DOTFILES_DEPLOYMENT" == "yes" ]; then
-        read -rp "Enter the Git repository URL for your dotfiles: " DOTFILES_REPO_URL
-        read -rp "Enter the branch to clone (default: main): " DOTFILES_BRANCH_INPUT
-        if [ -z "$DOTFILES_BRANCH_INPUT" ]; then
-            DOTFILES_BRANCH="main"
-        else
-            DOTFILES_BRANCH="$DOTFILES_BRANCH_INPUT"
-        fi
-    fi
-
-    log_info "All installation details gathered."
-}
-
-# --- Summary and Confirmation ---
-display_summary_and_confirm() {
-    log_header "Installation Summary"
-    echo "  Disk:                 $INSTALL_DISK"
-    echo "  Boot Mode:            $BOOT_MODE"
-    echo "  Partitioning:         $PARTITION_SCHEME"
-    echo "    Root FS Type:       $ROOT_FILESYSTEM_TYPE"
-    if [ "$WANT_HOME_PARTITION" == "yes" ]; then
-        echo "    Home FS Type:       $HOME_FILESYSTEM_TYPE"
-    fi
-    echo "    Swap:               $WANT_SWAP"
-    echo "    /home:              $WANT_HOME_PARTITION"
-    echo "    Encryption:         $WANT_ENCRYPTION"
-    if [ "$WANT_ENCRYPTION" == "yes" ]; then
-        echo "    LUKS Passphrase:    ***ENCRYPTED***"
-    fi
-    echo "    LVM:                $WANT_LVM"
-    if [ "$WANT_RAID" == "yes" ]; then
-        echo "    RAID Level:         $RAID_LEVEL"
-        echo "    RAID Disks:         ${RAID_DEVICES[*]}"
-    fi
-    echo "  Kernel:               $KERNEL_TYPE"
-    echo "  CPU Microcode:        $CPU_MICROCODE_TYPE (auto-installed)"
-    echo "  Timezone:             $TIMEZONE"
-    echo "  Locale:               $LOCALE"
-    echo "  Keymap:               $KEYMAP"
-    echo "  Reflector Country:    $REFLECTOR_COUNTRY_CODE"
-    echo "  Hostname:             $SYSTEM_HOSTNAME"
-    echo "  Main User:            $MAIN_USERNAME"
-    echo "  Desktop Env:          $DESKTOP_ENVIRONMENT"
-    echo "  Display Manager:      $DISPLAY_MANAGER"
-    echo "  GPU Driver:           $GPU_DRIVER_TYPE (auto-installed)"
-    echo "  Bootloader:           $BOOTLOADER_TYPE"
-    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
-        echo "    OS Prober:          $ENABLE_OS_PROBER"
-        if [ "$WANT_GRUB_THEME" == "yes" ]; then
-            echo "    GRUB Theme:         $GRUB_THEME_CHOICE"
-        fi
-    fi
-    echo "  Multilib:             $WANT_MULTILIB"
-    echo "  AUR Helper:           $WANT_AUR_HELPER"
-    if [ "$WANT_AUR_HELPER" == "yes" ]; then
-        echo "    AUR Helper Type:    $AUR_HELPER_CHOICE"
-    fi
-    echo "  Flatpak:              $WANT_FLATPAK"
-    echo "  Custom Packages:      $INSTALL_CUSTOM_PACKAGES"
-    if [ "$INSTALL_CUSTOM_PACKAGES" == "yes" ]; then
-        echo "    List:               See config.sh"
-    fi
-    echo "  Custom AUR Packages:  $INSTALL_CUSTOM_AUR_PACKAGES"
-    if [ "$INSTALL_CUSTOM_AUR_PACKAGES" == "yes" ]; then
-        echo "    List:               See config.sh"
-    fi
-    echo "  Numlock on Boot:      $WANT_NUMLOCK_ON_BOOT"
-    echo "  Dotfiles Deployment:  $WANT_DOTFILES_DEPLOYMENT"
-    if [ "$WANT_DOTFILES_DEPLOYMENT" == "yes" ]; then
-        echo "    Repo URL:           $DOTFILES_REPO_URL"
-        echo "    Branch:             $DOTFILES_BRANCH"
-    fi
-
-    prompt_yes_no "Do you want to proceed with the installation (THIS WILL WIPE $INSTALL_DISK)? " CONFIRM_INSTALL
-    if [ "$CONFIRM_INSTALL" == "no" ]; then
-        return 1
-    fi
-    return 0
-}
-
-prompt_reboot_system() {
-    prompt_yes_no "Installation complete. Reboot now?" REBOOT_NOW
-    if [ "$REBOOT_NOW" == "yes" ]; then
-        log_info "Rebooting..."
-        reboot
-    else
-        log_info "Please reboot manually when ready. Exiting."
-    fi
-}
-
-
-gather_installation_details() {
-    log_header "SYSTEM & STORAGE CONFIGURATION"
-
-    # Wi-Fi Connection (early, as it might be needed for reflector prereqs)
-    prompt_yes_no "Do you want to connect to a Wi-Fi network now?" WANT_WIFI_CONNECTION
-    if [ "$WANT_WIFI_CONNECTION" == "yes" ]; then
-        configure_wifi_live_dialog || error_exit "Wi-Fi connection setup failed. Cannot proceed without internet."
-    fi
-
-    # Auto-detect boot mode, allow override for BIOS.
-    log_info "Detecting system boot mode."
-    if [ -d "/sys/firmware/efi" ]; then # Bash 3.x does not support [[ -d /sys/firmware/efi ]] for directory check
-        BOOT_MODE="uefi"
-        log_info "Detected UEFI boot mode."
-
-        local fw_platform_size_file="/sys/firmware/efi/fw_platform_size"
-        if [ -f "$fw_platform_size_file" ]; then
-            local uefi_bitness=$(cat "$fw_platform_size_file")
-            if [ "$uefi_bitness" == "32" ]; then
-                error_exit "Detected 32-bit UEFI firmware. Arch Linux x86_64 requires 64-bit UEFI or BIOS boot mode. Please switch to BIOS/Legacy boot in your firmware settings or perform a manual installation."
-            fi
-            log_info "Detected ${uefi_bitness}-bit UEFI firmware." # Bash 3.x doesn't support ${var^^}
-        else
-            log_warn "Could not determine UEFI firmware bitness (missing $fw_platform_size_file)."
-            log_warn "Proceeding assuming 64-bit UEFI, but manual verification is recommended if issues arise."
-        fi
-
-        prompt_yes_no "Force BIOS/Legacy boot mode instead of UEFI?" OVERRIDE_BOOT_MODE
-        if [ "$OVERRIDE_BOOT_MODE" == "yes" ]; then
-            BOOT_MODE="bios"
-            log_warn "Forcing BIOS/Legacy boot mode."
-        fi
-    else
-        BOOT_MODE="bios"
-        log_info "Detected BIOS/Legacy boot mode."
-    fi
-
-    # Select primary installation disk.
-    local available_disks=($(get_available_disks))
-    if [ ${#available_disks[@]} -eq 0 ]; then
-        error_exit "No suitable disks found for installation. Exiting."
-    fi
-    select_option "Select the primary installation disk:" available_disks INSTALL_DISK
-
-    # Select partitioning scheme.
-    local scheme_options=("auto_simple" "auto_luks_lvm")
-    local other_disks_for_raid=()
-    for d in "${available_disks[@]}"; do
-        if [ "$d" != "$INSTALL_DISK" ]; then
-            other_disks_for_raid+=("$d")
-        fi
-    done
-
-    if [ ${#other_disks_for_raid[@]} -ge 1 ]; then
-        scheme_options+=("auto_raid_luks_lvm")
-    else
-        log_warn "Not enough additional disks for RAID options. Skipping RAID schemes."
-    fi
-    scheme_options+=("manual")
-
-    select_option "Select partitioning scheme:" scheme_options PARTITION_SCHEME
-
-    # Conditional prompts based on selected scheme.
-    case "$PARTITION_SCHEME" in
-        auto_simple)
-            WANT_ENCRYPTION="no"
-            WANT_LVM="no"
-            WANT_RAID="no"
-            prompt_yes_no "Do you want a swap partition?" WANT_SWAP
-            prompt_yes_no "Do you want a separate /home partition?" WANT_HOME_PARTITION
-            ;;
-        auto_luks_lvm)
-            WANT_ENCRYPTION="yes"
-            WANT_LVM="yes"
-            WANT_RAID="no"
-            prompt_yes_no "Do you want a swap Logical Volume?" WANT_SWAP
-            prompt_yes_no "Do you want a separate /home Logical Volume?" WANT_HOME_PARTITION
-            secure_password_input "Enter LUKS encryption passphrase: " LUKS_PASSPHRASE
-            ;;
-        auto_raid_luks_lvm)
-            WANT_RAID="yes"
-            WANT_ENCRYPTION="yes"
-            WANT_LVM="yes"
-
-            log_warn "RAID device selection requires additional disks. You must select them now."
-            log_info "Available additional disks for RAID:"
-            local i=1
-            local display_other_disks=()
-            for d in "${other_disks_for_raid[@]}"; do
-                display_other_disks+=("($i) $d")
-                i=$((i+1))
-            done
-            select_option "Select additional disk(s) for RAID (space-separated numbers, e.g., '1 3'):" display_other_disks selected_raid_disk_numbers_str
-
-            IFS=' ' read -r -a selected_nums_array <<< "$(trim_string "$selected_raid_disk_numbers_str")"
+            select_option "Select snapshot frequency:" BTRFS_SNAPSHOT_FREQUENCY_OPTIONS BTRFS_SNAPSHOT_FREQUENCY
             
-            RAID_DEVICES=("$INSTALL_DISK")
-            for num_str in "${selected_nums_array[@]}"; do
-                local index=$((num_str - 1))
-                if (( index >= 0 && index < ${#other_disks_for_raid[@]} )); then
-                    RAID_DEVICES+=("${other_disks_for_raid[$index]}")
-                else
-                    log_warn "Invalid RAID disk number: $num_str. Skipping."
-                fi
-            done
-            if [ ${#RAID_DEVICES[@]} -lt 2 ]; then error_exit "RAID requires at least 2 disks. Please re-run and select more."; fi
-
-            select_option "Select RAID level:" RAID_LEVEL_OPTIONS RAID_LEVEL
-            prompt_yes_no "Do you want a swap Logical Volume?" WANT_SWAP
-            prompt_yes_no "Do you want a separate /home Logical Volume?" WANT_HOME_PARTITION
-            secure_password_input "Enter LUKS encryption passphrase: " LUKS_PASSPHRASE
-            ;;
-        manual)
-            log_warn "Manual partitioning selected. You will be guided to perform partitioning steps yourself."
-            log_warn "Ensure you create and mount /mnt, /mnt/boot (and /mnt/boot/efi if UEFI) correctly."
-            WANT_SWAP="no"
-            WANT_HOME_PARTITION="no"
-            WANT_ENCRYPTION="no"
-            WANT_LVM="no"
-            WANT_RAID="no"
-            ;;
-    esac
-
-    # Filesystem Type Selection (for Root and Home if applicable)
-    if [ "$PARTITION_SCHEME" != "manual" ]; then
-        log_info "Configuring filesystem types for root and home partitions."
-        select_option "Select filesystem for the root (/) partition:" FILESYSTEM_OPTIONS ROOT_FILESYSTEM_TYPE
-        if [ "$?" -ne 0 ]; then
-            error_exit "Root filesystem selection failed."
-        fi
-
-        if [ "$WANT_HOME_PARTITION" == "yes" ]; then
-            local default_home_fs_choice="$ROOT_FILESYSTEM_TYPE"
-            select_option "Select filesystem for the /home partition (default: $default_home_fs_choice):" FILESYSTEM_OPTIONS HOME_FILESYSTEM_TYPE_TEMP
-            if [ "$?" -ne 0 ]; then
-                error_exit "Home filesystem selection failed."
-            fi
-            if [ -z "$HOME_FILESYSTEM_TYPE_TEMP" ]; then
-                HOME_FILESYSTEM_TYPE="$default_home_fs_choice"
+            prompt_number "How many snapshots should be kept? (default: 10)" BTRFS_KEEP_SNAPSHOTS "10"
+            
+            prompt_yes_no "Do you want to install btrfs-assistant (AUR) for GUI snapshot management?" WANT_BTRFS_ASSISTANT
+            
+            if [ "$BOOTLOADER_TYPE" == "grub" ]; then
+                log_info "GRUB bootloader detected. Snapshots will be available in the boot menu for system recovery."
             else
-                HOME_FILESYSTEM_TYPE="$HOME_FILESYSTEM_TYPE_TEMP"
+                log_warn "systemd-boot detected. Snapshot boot menu integration is limited."
+                log_warn "Consider using GRUB for better snapshot recovery options."
             fi
         fi
     fi
-
 
     log_header "BASE SYSTEM & USER CONFIGURATION"
 
@@ -1213,13 +444,21 @@ gather_installation_details() {
         error_exit "Keymap selection failed."
     fi
 
-    # Reflector Country Code (Mirrorlist).
+    # Reflector Country Code (Mirrorlist) - Intelligent suggestion based on timezone.
     log_info "Configuring pacman mirror country."
-    local use_default_mirror_country=""
-    prompt_yes_no "Use default mirror country (${REFLECTOR_COUNTRY_CODE})? " use_default_mirror_country
+    
+    # Suggest mirror country based on selected timezone
+    local suggested_country=$(suggest_mirror_country_from_timezone "$TIMEZONE")
+    log_info "Based on your timezone ($TIMEZONE), I suggest using $suggested_country mirrors for faster downloads."
+    
+    local use_suggested_mirror_country=""
+    prompt_yes_no "Use suggested mirror country ($suggested_country) for faster downloads? " use_suggested_mirror_country
 
-    if [ "$use_default_mirror_country" == "no" ]; then
-        log_info "Available common countries for reflector:"
+    if [ "$use_suggested_mirror_country" == "yes" ]; then
+        REFLECTOR_COUNTRY_CODE="$suggested_country"
+        log_info "Using suggested mirror country: $REFLECTOR_COUNTRY_CODE"
+    else
+        log_info "Available countries for reflector:"
         local temp_reflector_country_choice=""
         select_option "Select preferred mirror country code:" REFLECTOR_COMMON_COUNTRIES temp_reflector_country_choice
         if [ "$?" -ne 0 ]; then # Check for select_option failure
@@ -1227,8 +466,8 @@ gather_installation_details() {
         fi
         REFLECTOR_COUNTRY_CODE="$temp_reflector_country_choice"
         if [ -z "$REFLECTOR_COUNTRY_CODE" ]; then
-            log_warn "No country code selected. Sticking with default: US"
-            REFLECTOR_COUNTRY_CODE="US"
+            log_warn "No country code selected. Using suggested country: $suggested_country"
+            REFLECTOR_COUNTRY_CODE="$suggested_country"
         fi
     fi
 
@@ -1237,7 +476,15 @@ gather_installation_details() {
     # User Credentials.
     read -rp "Enter hostname: " SYSTEM_HOSTNAME
     secure_password_input "Enter root password: " ROOT_PASSWORD
-    read -rp "Enter main username: " MAIN_USERNAME
+    
+    # Get main username with validation
+    while [ -z "$MAIN_USERNAME" ]; do
+        read -rp "Enter main username: " MAIN_USERNAME
+        if [ -z "$MAIN_USERNAME" ]; then
+            log_error "Username cannot be empty. Please enter a valid username."
+        fi
+    done
+    
     secure_password_input "Enter password for $MAIN_USERNAME: " MAIN_USER_PASSWORD
 
     # Desktop Environment and Display Manager.
@@ -1267,6 +514,60 @@ gather_installation_details() {
     if [ "$BOOTLOADER_TYPE" == "grub" ]; then
         prompt_yes_no "Enable OS Prober for dual-boot detection (recommended for dual-boot systems)?" ENABLE_OS_PROBER
     fi
+    
+    # Time Synchronization Choice
+    echo ""
+    echo "=== Time Synchronization ==="
+    echo "Choose your time synchronization method:"
+    echo "  1) ntpd - Traditional NTP daemon (recommended for precision)"
+    echo "  2) chrony - Modern NTP client with better accuracy"
+    echo "  3) systemd-timesyncd - Lightweight built-in option"
+    echo ""
+    while true; do
+        echo -n "Enter choice (1-3) [1]: "
+        read -r choice
+        case "$choice" in
+            "1"|"")
+                TIME_SYNC_CHOICE="ntpd"
+                break
+                ;;
+            "2")
+                TIME_SYNC_CHOICE="chrony"
+                break
+                ;;
+            "3")
+                TIME_SYNC_CHOICE="systemd-timesyncd"
+                break
+                ;;
+            *)
+                echo "Invalid choice. Please enter 1, 2, or 3."
+                ;;
+        esac
+    done
+    echo "Selected: $TIME_SYNC_CHOICE"
+    
+    
+    
+    
+    # Secure Boot (only for UEFI systems)
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        echo ""
+        echo "=== SECURE BOOT WARNING ==="
+        echo "Secure Boot is ONLY needed if:"
+        echo "  - You dual-boot with Windows 11"
+        echo "  - You play games that require TPM/Secure Boot"
+        echo "  - You have enterprise security requirements"
+        echo ""
+        echo "IMPORTANT: Before enabling Secure Boot:"
+        echo "  1. Disable Secure Boot in your UEFI firmware"
+        echo "  2. Clear all existing Secure Boot keys"
+        echo "  3. Ensure your motherboard supports custom key enrollment"
+        echo ""
+        echo "WARNING: If not configured properly, your system may not boot!"
+        echo "Most users should answer 'no' to this question."
+        echo ""
+        prompt_yes_no "Do you understand the risks and want to enable Secure Boot?" WANT_SECURE_BOOT
+    fi
 
     # Multilib Support (32-bit).
     prompt_yes_no "Enable 32-bit support (multilib repository)?" WANT_MULTILIB
@@ -1283,12 +584,18 @@ gather_installation_details() {
     # Flatpak Support.
     prompt_yes_no "Install Flatpak support?" WANT_FLATPAK
 
-    # Custom Packages (from config.sh).
-    prompt_yes_no "Do you want to install additional custom packages from the list in config.sh?" INSTALL_CUSTOM_PACKAGES
+    # Interactive Package Selection
+    prompt_yes_no "Do you want to install additional packages interactively?" INSTALL_CUSTOM_PACKAGES
+    if [ "$INSTALL_CUSTOM_PACKAGES" == "yes" ]; then
+        select_custom_packages
+    fi
 
-    # Custom AUR Packages (from config.sh).
+    # Interactive AUR Package Selection
     if [ "$WANT_AUR_HELPER" == "yes" ]; then
-        prompt_yes_no "Do you want to install additional custom AUR packages from the list in config.sh?" INSTALL_CUSTOM_AUR_PACKAGES
+        prompt_yes_no "Do you want to install additional AUR packages interactively?" INSTALL_CUSTOM_AUR_PACKAGES
+        if [ "$INSTALL_CUSTOM_AUR_PACKAGES" == "yes" ]; then
+            select_custom_aur_packages
+        fi
     fi
 
     # GRUB Theming.
@@ -1298,6 +605,18 @@ gather_installation_details() {
             select_option "Select GRUB Theme:" GRUB_THEME_OPTIONS GRUB_THEME_CHOICE
             if [ "$?" -ne 0 ]; then # Check for select_option failure
                 error_exit "GRUB Theme selection failed."
+            fi
+        fi
+    fi
+
+    # Plymouth Boot Splash.
+    prompt_yes_no "Install Plymouth boot splash screen?" WANT_PLYMOUTH
+    if [ "$WANT_PLYMOUTH" == "yes" ]; then
+        prompt_yes_no "Install Arch Glow Plymouth theme?" WANT_PLYMOUTH_THEME
+        if [ "$WANT_PLYMOUTH_THEME" == "yes" ]; then
+            select_option "Select Plymouth Theme:" PLYMOUTH_THEME_OPTIONS PLYMOUTH_THEME_CHOICE
+            if [ "$?" -ne 0 ]; then # Check for select_option failure
+                error_exit "Plymouth Theme selection failed."
             fi
         fi
     fi
@@ -1341,6 +660,14 @@ display_summary_and_confirm() {
         echo "    RAID Level:         $RAID_LEVEL"
         echo "    RAID Disks:         ${RAID_DEVICES[*]}"
     fi
+    if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ] || [ "$HOME_FILESYSTEM_TYPE" == "btrfs" ]; then
+        echo "    Btrfs Snapshots:    $WANT_BTRFS_SNAPSHOTS"
+        if [ "$WANT_BTRFS_SNAPSHOTS" == "yes" ]; then
+            echo "      Frequency:        $BTRFS_SNAPSHOT_FREQUENCY"
+            echo "      Keep Count:       $BTRFS_KEEP_SNAPSHOTS"
+            echo "      GUI Tool:         $WANT_BTRFS_ASSISTANT"
+        fi
+    fi
     echo "  Kernel:               $KERNEL_TYPE"
     echo "  CPU Microcode:        $CPU_MICROCODE_TYPE (auto-installed)"
     echo "  Timezone:             $TIMEZONE"
@@ -1359,6 +686,23 @@ display_summary_and_confirm() {
             echo "    GRUB Theme:         $GRUB_THEME_CHOICE"
         fi
     fi
+    echo "  Plymouth Boot Splash: $WANT_PLYMOUTH"
+    if [ "$WANT_PLYMOUTH" == "yes" ] && [ "$WANT_PLYMOUTH_THEME" == "yes" ]; then
+        echo "    Plymouth Theme:     $PLYMOUTH_THEME_CHOICE"
+    fi
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        echo "    Secure Boot:        $WANT_SECURE_BOOT"
+    fi
+    echo "    Time Sync:          $TIME_SYNC_CHOICE"
+    echo "    Timezone:           $TIMEZONE"
+    echo "    Locale:             $LOCALE"
+    echo "    Keymap:             $KEYMAP"
+    echo "    Hostname:           $SYSTEM_HOSTNAME"
+    echo "    Mirror Country:     $REFLECTOR_COUNTRY_CODE"
+    echo "    CPU Microcode:      $CPU_MICROCODE_TYPE"
+    echo "    PGP Verification:   $VERIFY_ISO_SIGNATURE"
+    echo "    Desktop Environment: $DESKTOP_ENVIRONMENT"
+    echo "    Display Manager:    $DISPLAY_MANAGER"
     echo "  Multilib:             $WANT_MULTILIB"
     echo "  AUR Helper:           $WANT_AUR_HELPER"
     if [ "$WANT_AUR_HELPER" == "yes" ]; then
@@ -1366,12 +710,12 @@ display_summary_and_confirm() {
     fi
     echo "  Flatpak:              $WANT_FLATPAK"
     echo "  Custom Packages:      $INSTALL_CUSTOM_PACKAGES"
-    if [ "$INSTALL_CUSTOM_PACKAGES" == "yes" ]; then
-        echo "    List:               See config.sh"
+    if [ "$INSTALL_CUSTOM_PACKAGES" == "yes" ] && [ -n "$CUSTOM_PACKAGES" ]; then
+        echo "    List:               $CUSTOM_PACKAGES"
     fi
     echo "  Custom AUR Packages:  $INSTALL_CUSTOM_AUR_PACKAGES"
-    if [ "$INSTALL_CUSTOM_AUR_PACKAGES" == "yes" ]; then
-        echo "    List:               See config.sh"
+    if [ "$INSTALL_CUSTOM_AUR_PACKAGES" == "yes" ] && [ -n "$CUSTOM_AUR_PACKAGES" ]; then
+        echo "    List:               $CUSTOM_AUR_PACKAGES"
     fi
     echo "  Numlock on Boot:      $WANT_NUMLOCK_ON_BOOT"
     echo "  Dotfiles Deployment:  $WANT_DOTFILES_DEPLOYMENT"
@@ -1388,6 +732,33 @@ display_summary_and_confirm() {
 }
 
 prompt_reboot_system() {
+    if [ "$WANT_SECURE_BOOT" == "yes" ]; then
+        echo ""
+        echo "⚠️  SECURE BOOT WARNING ⚠️"
+        echo "You enabled Secure Boot during installation."
+        echo "Your system will boot normally, but Secure Boot is NOT yet enabled."
+        echo ""
+        echo "IMPORTANT: After first boot, you must:"
+        echo "1. Read /root/SECURE_BOOT_SETUP.md"
+        echo "2. Run: sbctl enroll-keys"
+        echo "3. Enable Secure Boot in UEFI firmware"
+        echo ""
+        echo "If you don't complete these steps, Secure Boot will not work."
+        echo ""
+    fi
+    
+    # Show log access information
+    echo ""
+    echo "📋 LOG FILES PRESERVED:"
+    echo "   Primary Log:    /var/log/archinstall.log"
+    echo "   Backup Log:     /tmp/archinstall.log"
+    echo "   Summary File:   /tmp/archinstall-summary.txt"
+    echo ""
+    echo "   To view logs:"
+    echo "     cat /tmp/archinstall.log"
+    echo "     tail -f /tmp/archinstall.log"
+    echo ""
+    
     prompt_yes_no "Installation complete. Reboot now?" REBOOT_NOW
     if [ "$REBOOT_NOW" == "yes" ]; then
         log_info "Rebooting..."
@@ -1395,4 +766,291 @@ prompt_reboot_system() {
     else
         log_info "Please reboot manually when ready. Exiting."
     fi
+}
+
+
+
+
+
+# --- Interactive Package Selection Functions ---
+
+# Searches for packages using pacman -Ss
+search_packages() {
+    local search_term="$1"
+    local results_file="/tmp/package_search_results.txt"
+    
+    echo "Searching for packages matching: $search_term"
+    pacman -Ss "$search_term" > "$results_file" 2>/dev/null
+    
+    if [ ! -s "$results_file" ]; then
+        echo "No packages found matching: $search_term"
+        return 1
+    fi
+    
+    # Display results with line numbers
+    echo "Search results:"
+    echo "==============="
+    nl -w3 -s": " "$results_file"
+    echo "==============="
+    return 0
+}
+
+# Searches for AUR packages using available AUR helper or curl
+search_aur_packages() {
+    local search_term="$1"
+    local results_file="/tmp/aur_search_results.txt"
+    
+    echo "Searching AUR for packages matching: $search_term"
+    
+    # Method 1: Try using available AUR helper
+    if command -v paru &> /dev/null; then
+        paru -Ss "$search_term" > "$results_file" 2>/dev/null
+    elif command -v yay &> /dev/null; then
+        yay -Ss "$search_term" > "$results_file" 2>/dev/null
+    else
+        # Method 2: Use curl to search AUR web interface (fallback)
+        echo "AUR helper not available, using web search as fallback..."
+        local aur_url="https://aur.archlinux.org/rpc/?v=5&type=search&arg=$search_term"
+        
+        if command -v curl &> /dev/null; then
+            # Use curl to search AUR API
+            curl -s "$aur_url" | grep -o '"Name":"[^"]*"' | sed 's/"Name":"//g' | sed 's/"//g' > "$results_file" 2>/dev/null
+            
+            if [ ! -s "$results_file" ]; then
+                echo "No AUR packages found matching: $search_term"
+                return 1
+            fi
+            
+            # Display results
+            echo "AUR search results (from web API):"
+            echo "=================================="
+            nl -w3 -s": " "$results_file"
+            echo "=================================="
+            echo "Note: This is a basic search. For detailed package info, install an AUR helper first."
+            return 0
+        else
+            echo "Neither AUR helper nor curl available for AUR search."
+            echo "Please install an AUR helper (yay/paru) or curl first."
+            return 1
+        fi
+    fi
+    
+    if [ ! -s "$results_file" ]; then
+        echo "No AUR packages found matching: $search_term"
+        return 1
+    fi
+    
+    # Display results with line numbers
+    echo "AUR search results:"
+    echo "=================="
+    nl -w3 -s": " "$results_file"
+    echo "=================="
+    return 0
+}
+
+# Interactive package selection for official repositories
+select_custom_packages() {
+    echo "=== Interactive Package Selection ==="
+    echo "You can search for packages and add them to your installation."
+    echo "Commands:"
+    echo "  search <term>  - Search for packages"
+    echo "  add <package>  - Add package to installation list"
+    echo "  remove <package> - Remove package from installation list"
+    echo "  list           - Show current package list"
+    echo "  done           - Finish package selection"
+    echo ""
+    
+    local selected_packages=()
+    local continue_selection=true
+    
+    while [ "$continue_selection" == "true" ]; do
+        echo -n "Package selection> "
+        read -r command package_name
+        
+        case "$command" in
+            "search")
+                if [ -n "$package_name" ]; then
+                    search_packages "$package_name"
+                else
+                    echo "Usage: search <search_term>"
+                fi
+                ;;
+            "add")
+                if [ -n "$package_name" ]; then
+                    # Check if package exists
+                    if pacman -Si "$package_name" &>/dev/null; then
+                        selected_packages+=("$package_name")
+                        echo "Added: $package_name"
+                    else
+                        echo "Package \"$package_name\" not found in official repositories"
+                    fi
+                else
+                    echo "Usage: add <package_name>"
+                fi
+                ;;
+            "remove")
+                if [ -n "$package_name" ]; then
+                    local found=false
+                    local new_packages=()
+                    for pkg in "${selected_packages[@]}"; do
+                        if [ "$pkg" != "$package_name" ]; then
+                            new_packages+=("$pkg")
+                        else
+                            found=true
+                        fi
+                    done
+                    selected_packages=("${new_packages[@]}")
+                    if [ "$found" == "true" ]; then
+                        echo "Removed: $package_name"
+                    else
+                        echo "Package \"$package_name\" not in selection list"
+                    fi
+                else
+                    echo "Usage: remove <package_name>"
+                fi
+                ;;
+            "list")
+                if [ ${#selected_packages[@]} -eq 0 ]; then
+                    echo "No packages selected"
+                else
+                    echo "Selected packages:"
+                    for pkg in "${selected_packages[@]}"; do
+                        echo "  - $pkg"
+                    done
+                fi
+                ;;
+            "done")
+                continue_selection=false
+                ;;
+            *)
+                echo "Unknown command: $command"
+                echo "Available commands: search, add, remove, list, done"
+                ;;
+        esac
+        echo ""
+    done
+    
+    # Set the global variable
+    if [ ${#selected_packages[@]} -gt 0 ]; then
+        CUSTOM_PACKAGES="${selected_packages[*]}"
+        echo "Final package selection: $CUSTOM_PACKAGES"
+    else
+        CUSTOM_PACKAGES=""
+        echo "No packages selected"
+    fi
+}
+
+# Interactive package selection for AUR repositories
+select_custom_aur_packages() {
+    echo "=== Interactive AUR Package Selection ==="
+    echo "You can search for AUR packages and add them to your installation."
+    echo "Commands:"
+    echo "  search <term>  - Search AUR for packages"
+    echo "  add <package>  - Add AUR package to installation list"
+    echo "  remove <package> - Remove AUR package from installation list"
+    echo "  list           - Show current AUR package list"
+    echo "  done           - Finish AUR package selection"
+    echo ""
+    
+    local selected_aur_packages=()
+    local continue_selection=true
+    
+    while [ "$continue_selection" == "true" ]; do
+        echo -n "AUR package selection> "
+        read -r command package_name
+        
+        case "$command" in
+            "search")
+                if [ -n "$package_name" ]; then
+                    search_aur_packages "$package_name"
+                else
+                    echo "Usage: search <search_term>"
+                fi
+                ;;
+            "add")
+                if [ -n "$package_name" ]; then
+                    # For AUR packages, we cannot easily verify existence without the helper
+                    # So we will just add it and let the installation process handle errors
+                    selected_aur_packages+=("$package_name")
+                    echo "Added: $package_name (will be verified during installation)"
+                else
+                    echo "Usage: add <package_name>"
+                fi
+                ;;
+            "remove")
+                if [ -n "$package_name" ]; then
+                    local found=false
+                    local new_packages=()
+                    for pkg in "${selected_aur_packages[@]}"; do
+                        if [ "$pkg" != "$package_name" ]; then
+                            new_packages+=("$pkg")
+                        else
+                            found=true
+                        fi
+                    done
+                    selected_aur_packages=("${new_packages[@]}")
+                    if [ "$found" == "true" ]; then
+                        echo "Removed: $package_name"
+                    else
+                        echo "Package \"$package_name\" not in selection list"
+                    fi
+                else
+                    echo "Usage: remove <package_name>"
+                fi
+                ;;
+            "list")
+                if [ ${#selected_aur_packages[@]} -eq 0 ]; then
+                    echo "No AUR packages selected"
+                else
+                    echo "Selected AUR packages:"
+                    for pkg in "${selected_aur_packages[@]}"; do
+                        echo "  - $pkg"
+                    done
+                fi
+                ;;
+            "done")
+                continue_selection=false
+                ;;
+            *)
+                echo "Unknown command: $command"
+                echo "Available commands: search, add, remove, list, done"
+                ;;
+        esac
+        echo ""
+    done
+    
+    # Set the global variable
+    if [ ${#selected_aur_packages[@]} -gt 0 ]; then
+        CUSTOM_AUR_PACKAGES="${selected_aur_packages[*]}"
+        echo "Final AUR package selection: $CUSTOM_AUR_PACKAGES"
+    else
+        CUSTOM_AUR_PACKAGES=""
+        echo "No AUR packages selected"
+    fi
+}
+
+# --- Utility Functions ---
+# Prompts for a number input with default value
+prompt_number() {
+    local prompt_text="$1"
+    local variable_name="$2"
+    local default_value="$3"
+    
+    echo ""
+    echo "$prompt_text"
+    read -p "Enter number [$default_value]: " user_input
+    
+    if [ -z "$user_input" ]; then
+        user_input="$default_value"
+    fi
+    
+    # Validate that input is a number
+    if ! [[ "$user_input" =~ ^[0-9]+$ ]]; then
+        log_error "Invalid number: $user_input. Using default: $default_value"
+        user_input="$default_value"
+    fi
+    
+    # Set the variable
+    eval "$variable_name=\"$user_input\""
+    log_info "Set $variable_name to: $user_input"
 }

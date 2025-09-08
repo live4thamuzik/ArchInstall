@@ -1,6 +1,121 @@
 #!/bin/bash
 # config.sh - All configurable options and package lists for Archl4tm (Bash 3.x Compatible)
 
+# --- Logging Configuration ---
+# Primary log file path for installation logs
+LOG_FILE="/var/log/archinstall.log"
+# Backup log file in user-accessible location
+LOG_BACKUP="/tmp/archinstall.log"
+# Final log location in installed system
+LOG_FINAL="/mnt/var/log/archinstall.log"
+
+# Enhanced logging with automatic log file creation and backup
+setup_logging() {
+    # Create log directory if it doesn't exist
+    mkdir -p "$(dirname "$LOG_FILE")"
+    
+    # Initialize primary log file with header
+    {
+        echo "=========================================="
+        echo "ArchInstall Log - $(date)"
+        echo "System: $(uname -a)"
+        echo "User: $(whoami)"
+        echo "Working Directory: $(pwd)"
+        echo "=========================================="
+        echo ""
+    } > "$LOG_FILE"
+    
+    # Create backup log file (always accessible)
+    cp "$LOG_FILE" "$LOG_BACKUP"
+    
+    log_info "Logging initialized: $LOG_FILE"
+    log_info "Backup log available at: $LOG_BACKUP"
+    log_info "Log files will be preserved for troubleshooting"
+}
+
+# Function to ensure log files are always accessible
+preserve_logs() {
+    local status="$1"  # "success", "failure", or "interrupted"
+    
+    log_info "Preserving log files for user access..."
+    
+    # Always copy to backup location
+    if [[ -f "$LOG_FILE" ]]; then
+        cp "$LOG_FILE" "$LOG_BACKUP"
+        log_info "Log backup created: $LOG_BACKUP"
+    fi
+    
+    # Copy to installed system if mounted
+    if [[ -d "/mnt" ]] && mountpoint -q "/mnt"; then
+        mkdir -p "/mnt/var/log"
+        if [[ -f "$LOG_FILE" ]]; then
+            cp "$LOG_FILE" "$LOG_FINAL"
+            log_info "Log copied to installed system: $LOG_FINAL"
+        fi
+    fi
+    
+    # Create a summary file with key information
+    local summary_file="/tmp/archinstall-summary.txt"
+    {
+        echo "=========================================="
+        echo "ArchInstall Summary - $(date)"
+        echo "=========================================="
+        echo "Status: $status"
+        echo "Primary Log: $LOG_FILE"
+        echo "Backup Log: $LOG_BACKUP"
+        if [[ -f "$LOG_FINAL" ]]; then
+            echo "Installed System Log: $LOG_FINAL"
+        fi
+        echo ""
+        echo "To view logs:"
+        echo "  cat $LOG_BACKUP"
+        echo "  tail -f $LOG_BACKUP"
+        echo ""
+        if [[ "$status" == "failure" ]]; then
+            echo "Installation failed. Check the logs above for details."
+            echo "Common issues:"
+            echo "  - Internet connection problems"
+            echo "  - Disk space issues"
+            echo "  - Invalid user input"
+            echo "  - Hardware compatibility"
+        elif [[ "$status" == "success" ]]; then
+            echo "Installation completed successfully!"
+            echo "Logs have been preserved for your reference."
+        fi
+        echo "=========================================="
+    } > "$summary_file"
+    
+    log_info "Summary file created: $summary_file"
+}
+
+# Function to display log access information
+show_log_access() {
+    echo ""
+    echo "=========================================="
+    echo "📋 LOG FILE ACCESS INFORMATION"
+    echo "=========================================="
+    echo "Primary Log:    $LOG_FILE"
+    echo "Backup Log:     $LOG_BACKUP"
+    echo "Summary File:   /tmp/archinstall-summary.txt"
+    if [[ -d "/mnt" ]] && mountpoint -q "/mnt"; then
+        echo "Installed Log:  $LOG_FINAL"
+    fi
+    echo ""
+    echo "To view logs:"
+    echo "  cat $LOG_BACKUP"
+    echo "  tail -f $LOG_BACKUP"
+    echo "  less $LOG_BACKUP"
+    echo ""
+    echo "Logs are preserved for troubleshooting!"
+    echo "=========================================="
+    echo ""
+}
+
+# --- Constants ---
+readonly GRUB_TIMEOUT_DEFAULT=5
+readonly EFI_PART_SIZE_MIB=1024
+readonly BOOT_PART_SIZE_MIB=2048
+
 # --- Installation Parameters (Populated by dialogs.sh or defaults) ---
 INSTALL_DISK=""               # Primary disk selected by user (e.g., /dev/sda). Blank initially.
 OVERRIDE_BOOT_MODE="no"       # "yes" if user forces BIOS mode. Default to "no".
@@ -18,8 +133,7 @@ RAID_LEVEL=""                 # e.g., "1", "5". Blank initially.
 RAID_DEVICES=()               # Array of disks for RAID, if applicable. Empty initially.
 
 # Default Partition Sizes (for auto-partitioning schemes) - in MiB for parted calculations
-EFI_PART_SIZE_MIB=1024         # 1024 MiB for EFI partition
-BOOT_PART_SIZE_MIB=2048       # 2048 MiB (2 GiB) for /boot partition
+# Note: These values are now defined as constants at the top of the file
 
 # Filesystem types for root and home partitions - will be selected by user
 ROOT_FILESYSTEM_TYPE="ext4"   # Default FS for root, will be overridden by prompt
@@ -40,27 +154,61 @@ ROOT_PASSWORD=""              # Populated by dialogs.sh (securely handled). Blan
 MAIN_USERNAME=""              # Populated by dialogs.sh. Blank initially.
 MAIN_USER_PASSWORD=""         # Populated by dialogs.sh. Blank initially.
 
+# --- Boot Configuration ---
+BOOTLOADER_TYPE="grub"        # "grub" or "systemd-boot". Default to "grub".
+ENABLE_OS_PROBER="no"         # "yes" or "no" (for GRUB dual-boot). Default to "no".
+WANT_SECURE_BOOT="no"         # "yes" or "no". Default to "no".
+TIME_SYNC_CHOICE="ntpd"       # "ntpd", "chrony", or "systemd-timesyncd". Default to "ntpd".
+
+# --- Localization Configuration ---
+LOCALE="en_US.UTF-8"          # Primary locale. Default to "en_US.UTF-8".
+KEYMAP="us"                   # Console keymap. Default to "us".
+TIMEZONE="UTC"                # Timezone. Default to "UTC".
+REFLECTOR_COUNTRY_CODE="US"   # Country code for reflector mirror selection. Default to "US".
+SYSTEM_HOSTNAME="archlinux"   # System hostname. Default to "archlinux".
+
+# --- Security Configuration ---
+VERIFY_ISO_SIGNATURE="yes"    # "yes" or "no". Default to "yes".
+
+# --- Desktop Environment Configuration ---
 DESKTOP_ENVIRONMENT=""        # e.g., "gnome", "kde", "hyprland", "none". Blank initially.
 DISPLAY_MANAGER=""            # e.g., "gdm", "sddm", "none". Blank initially.
 GPU_DRIVER_TYPE="none"        # "amd", "nvidia", "intel", or "none" (auto-detected). Default to "none".
 
-BOOTLOADER_TYPE="grub"        # "grub" or "systemd-boot". Default to "grub".
-ENABLE_OS_PROBER="no"         # "yes" or "no" (for GRUB dual-boot). Default to "no".
-
+# --- Package Management Configuration ---
 WANT_MULTILIB="no"            # "yes" or "no". Default to "no".
 WANT_AUR_HELPER="no"          # "yes" or "no". Default to "no".
 AUR_HELPER_CHOICE=""          # e.g., "yay", "paru". Blank initially.
 WANT_FLATPAK="no"             # "yes" or "no". Default to "no".
 
+# --- Custom Package Installation ---
 INSTALL_CUSTOM_PACKAGES="no"  # "yes" or "no". Default to "no".
-CUSTOM_PACKAGES=""            # Space-separated list of custom official packages. User modifies directly in this file.
+CUSTOM_PACKAGES=""            # Space-separated list of custom official packages. Set interactively during installation.
 INSTALL_CUSTOM_AUR_PACKAGES="no" # "yes" or "no". Default to "no".
-CUSTOM_AUR_PACKAGES=""        # Space-separated list of custom AUR packages. User modifies directly in this file.
+CUSTOM_AUR_PACKAGES=""        # Space-separated list of custom AUR packages. Set interactively during installation.
 
+# --- GRUB Theme Configuration ---
 WANT_GRUB_THEME="no"          # "yes" or "no". Default to "no".
 GRUB_THEME_CHOICE=""          # e.g., "Vimix", "Poly-light". Blank initially.
 
+# --- Plymouth Configuration ---
+WANT_PLYMOUTH="no"            # "yes" or "no". Default to "no".
+WANT_PLYMOUTH_THEME="no"      # "yes" or "no". Default to "no".
+PLYMOUTH_THEME_CHOICE=""      # e.g., "arch-glow". Blank initially.
+
+# --- System Behavior Configuration ---
 WANT_NUMLOCK_ON_BOOT="no"     # "yes" or "no". Default to "no".
+
+# --- Filesystem Configuration ---
+ROOT_FILESYSTEM_TYPE="ext4"   # "ext4", "xfs", "btrfs". Default to "ext4".
+HOME_FILESYSTEM_TYPE="ext4"   # "ext4", "xfs", "btrfs". Default to "ext4".
+
+# --- Btrfs and Snapshot Configuration ---
+WANT_BTRFS="no"               # "yes" or "no". Default to "no".
+WANT_BTRFS_SNAPSHOTS="no"     # "yes" or "no". Default to "no". Requires WANT_BTRFS="yes".
+WANT_BTRFS_ASSISTANT="no"     # "yes" or "no". Default to "no". AUR package for GUI management.
+BTRFS_SNAPSHOT_FREQUENCY="daily" # "hourly", "daily", "weekly", "monthly". Default to "daily".
+BTRFS_KEEP_SNAPSHOTS="10"     # Number of snapshots to keep. Default to "10".
 
 # --- Dotfile Deployment (for fully themed installs) ---
 WANT_DOTFILES_DEPLOYMENT="no" # "yes" or "no"
@@ -186,6 +334,15 @@ declare -a BOOTLOADER_TYPES_OPTIONS=("grub" "systemd-boot")
 # AUR Helper options
 declare -a AUR_HELPERS_OPTIONS=("yay" "paru")
 
+# Desktop Environment Options
+declare -a DESKTOP_ENVIRONMENT_OPTIONS=("none" "gnome" "kde" "hyprland")
+
+# Display Manager Options
+declare -a DISPLAY_MANAGER_OPTIONS=("none" "gdm" "sddm")
+
+# Plymouth Theme Options
+declare -a PLYMOUTH_THEME_OPTIONS=("arch-glow")
+
 # GRUB Theme Options
 declare -a GRUB_THEME_OPTIONS=(
     "PolyDark"
@@ -198,11 +355,22 @@ declare -a GRUB_THEME_OPTIONS=(
 # Each variable name indicates the choice (e.g., _GNOME_PACKAGES).
 # To access, use: ${DESKTOP_ENVIRONMENTS_GNOME_PACKAGES[@]}
 
-declare -a BASE_PACKAGES_ESSENTIAL=("base")
+declare -a BASE_PACKAGES_ESSENTIAL=("base" "curl")
+declare -a BASE_PACKAGES_KERNEL_LINUX=("linux" "linux-firmware" "linux-headers")
+declare -a BASE_PACKAGES_KERNEL_LTS=("linux-lts" "linux-firmware" "linux-lts-headers")
 declare -a BASE_PACKAGES_BOOTLOADER_GRUB=("grub" "efibootmgr" "os-prober")
 declare -a BASE_PACKAGES_BOOTLOADER_SYSTEMDBOOT=("systemd-boot")
+declare -a BASE_PACKAGES_SECURE_BOOT=("sbctl")
 declare -a BASE_PACKAGES_NETWORK=("networkmanager" "dhcpcd")
 declare -a BASE_PACKAGES_SYSTEM_UTILS=("sudo" "man-db" "man-pages" "vim" "nano" "bash-completion" "git")
+# Time synchronization packages (user can choose)
+declare -a BASE_PACKAGES_TIME_SYNC_NTPD=("ntp")
+declare -a BASE_PACKAGES_TIME_SYNC_CHRONY=("chrony")
+declare -a BASE_PACKAGES_TIME_SYNC_SYSTEMD=("systemd-timesyncd")
+declare -a BASE_PACKAGES_SSD_UTILS=("util-linux")
+declare -a BASE_PACKAGES_DEVELOPMENT=("base-devel" "debugedit")
+declare -a BASE_PACKAGES_FILESYSTEM=("mtools" "dosfstools")
+declare -a BASE_PACKAGES_PLYMOUTH=("plymouth")
 # CPU Microcode packages (installed conditionally based on detection)
 declare -a BASE_PACKAGES_FIRMWARE_INTEL=("intel-ucode")
 declare -a BASE_PACKAGES_FIRMWARE_AMD=("amd-ucode")
@@ -212,26 +380,24 @@ declare -a BASE_PACKAGES_RAID=("mdadm")
 # Basic filesystem utilities
 declare -a BASE_PACKAGES_FS_EXT4=("e2fsprogs")
 declare -a BASE_PACKAGES_FS_BTRFS=("btrfs-progs")
+# Btrfs snapshot packages
+declare -a BASE_PACKAGES_BTRFS_SNAPSHOTS=("snapper" "grub-btrfs")
 declare -a BASE_PACKAGES_FS_XFS=("xfsprogs")
 
 
 # Desktop Environments and their core packages (indexed arrays of package names)
-declare -a DESKTOP_ENVIRONMENTS_GNOME_PACKAGES=("gnome" "gnome-extra" "gnome-tweaks" "gnome-shell-extensions" "gnome-browser-connector" "firefox")
-declare -a DESKTOP_ENVIRONMENTS_KDE_PACKAGES=("plasma-desktop" "kde-applications" "dolphin" "firefox" "lxappearance")
-# Hyprland specific list - Bash 3.x compatible long string
+declare -a DESKTOP_ENVIRONMENTS_GNOME_PACKAGES=("gnome" "gnome-extra" "gnome-tweaks" "firefox")
+declare -a DESKTOP_ENVIRONMENTS_KDE_PACKAGES=("plasma-desktop" "kde-applications" "dolphin" "firefox")
+# Hyprland packages - Core Hyprland and essential ecosystem packages
 declare -a DESKTOP_ENVIRONMENTS_HYPRLAND_PACKAGES=(
-    "hyprland" "hyprland-protocols" "xdg-desktop-portal-hyprland"
-    "hypridle" "hyprlock" "hyprpicker" "hyprshade" "hyprsunset" "cliphist" "grim" "grimblast-git" "slurp" "swappy" "swww" "swaylockeffects-git" "swayosd-git" "wlogout"
-    "kitty" "waybar" "wofi" "mako" "dunst"
-    "pipewire" "wireplumber" "pipewire-alsa" "pipewire-audio" "pipewire-jack" "pipewire-pulse" "pipewire-v4l2" "gst-plugin-pipewire" "pamixer" "pavucontrol"
-    "network-manager-applet"
-    "brightnessctl" "udiskie"
-    "polkit-gnome"
-    "qt5-wayland" "qt6-wayland" "kvantum" "kvantum-qt5" "qt5ct" "qt6ct"
-    "nwg-look" "nwg-displays" "bluez" "bluez-utils" "blueman"
-    "ttf-firacode-nerd" "ttf-font-awesome" "ttf-meslo-nerd" "noto-fonts-emoji" "ttf-anonymouspro-nerd" "ttf-daddytime-mono-nerd"
-    "dolphin" "rofi-wayland" "satty" "imagemagick"
-    "wlr-protocols" "wlr-randr"
+    "hyprland" "xdg-desktop-portal-hyprland"
+    "hypridle" "hyprlock" "hyprpicker" "hyprpaper"
+    "waybar" "wofi" "kitty" "dunst"
+    "pipewire" "wireplumber" "pipewire-alsa" "pipewire-pulse" "pavucontrol"
+    "polkit-gnome" "qt5-wayland" "qt6-wayland"
+    "ttf-firacode-nerd" "ttf-font-awesome" "noto-fonts-emoji"
+    "grim" "slurp" "swappy"
+    "brightnessctl" "network-manager-applet"
     "xdg-desktop-portal-gtk" "libnotify"
 )
 declare -a DESKTOP_ENVIRONMENTS_NONE_PACKAGES=("")
@@ -283,6 +449,12 @@ INITCPIO_NVME_HOOK="nvme"
 GRUB_CMDLINE_LUKS_BASE="cryptdevice=UUID=<LUKS_CONTAINER_UUID>:cryptroot"
 GRUB_CMDLINE_LVM_ON_LUKS="rd.lvm.vg=$VG_NAME"
 
+
+# --- Filesystem Options ---
+declare -a FILESYSTEM_OPTIONS=("ext4" "xfs" "btrfs")
+
+# --- Btrfs Snapshot Options ---
+declare -a BTRFS_SNAPSHOT_FREQUENCY_OPTIONS=("hourly" "daily" "weekly" "monthly")
 
 # --- Default Logical Volume Layout (for LVM schemes) ---
 # Direct scalar variables for Bash 3.x

@@ -85,6 +85,11 @@ do_auto_simple_partitioning() {
         format_filesystem "$part_dev" "$ROOT_FILESYSTEM_TYPE"
         capture_id_for_config "root" "$part_dev" "UUID"
         safe_mount "$part_dev" "/mnt"
+        
+        # Create Btrfs subvolumes if using Btrfs
+        if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ]; then
+            create_btrfs_subvolumes "/mnt"
+        fi
         current_start_mib=$((current_start_mib + root_size_mib))
         part_num=$((part_num + 1))
 
@@ -106,6 +111,11 @@ do_auto_simple_partitioning() {
         format_filesystem "$part_dev" "$ROOT_FILESYSTEM_TYPE"
         capture_id_for_config "root" "$part_dev" "UUID"
         safe_mount "$part_dev" "/mnt"
+        
+        # Create Btrfs subvolumes if using Btrfs
+        if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ]; then
+            create_btrfs_subvolumes "/mnt"
+        fi
     fi
 
     log_info "Simple auto partitioning complete. Filesystems formatted and mounted."

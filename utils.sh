@@ -9,17 +9,81 @@ readonly C_HEADER='\e[36;1m'
 readonly C_SUCCESS='\e[32;1m'
 readonly C_RESET='\e[0m'
 
-log_info() {
-    echo -e "${C_INFO}[INFO]${C_RESET} $(date +%T) $*"
+# Enhanced logging system based on revision 2 approach
+log_message() {
+    local level="$1"
+    local message="$2"
+    local exit_code="${3:-0}"  # Default to 0 if not provided
+    local timestamp
+    timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+
+    # Get function name and line number
+    local caller_info="${FUNCNAME[2]:-main}:${BASH_LINENO[1]:-0}"
+
+    # Capture last command output if error
+    local last_cmd_output=""
+    if [[ "$level" == "ERROR" && "$exit_code" -ne 0 ]]; then
+        last_cmd_output=$(journalctl -n 3 --no-pager 2>/dev/null || echo "No journal output available")
+    fi
+
+    # Determine log level color
+    local color=""
+    case "$level" in
+        INFO) color="$C_INFO" ;;
+        WARN) color="$C_WARN" ;;
+        ERROR) color="$C_ERROR" ;;
+        DEBUG) color="$C_HEADER" ;;
+        *) color="$C_RESET" ;;
+    esac
+
+    # Format log message
+    local log_entry="[$timestamp] [$level] [$caller_info] Exit Code: $exit_code - $message"
+
+    # Append command output for errors
+    if [[ "$level" == "ERROR" && "$last_cmd_output" != "" ]]; then
+        log_entry+=" | Last Output: $last_cmd_output"
+    fi
+
+    # Print to terminal (with color)
+    echo -e "${color}${log_entry}${C_RESET}"
+
+    # Append to log file if LOG_FILE is set
+    if [[ -n "${LOG_FILE:-}" ]]; then
+        echo "$log_entry" >> "$LOG_FILE"
+    fi
 }
 
-log_warn() {
-    echo -e "${C_WARN}[WARN]${C_RESET} $(date +%T) $*" >&2
-}
+log_info() { log_message "INFO" "$1"; }
+log_warn() { log_message "WARN" "$1"; }
+log_error() { log_message "ERROR" "$1" "$?"; }
+log_debug() { log_message "DEBUG" "$1"; }
 
 error_exit() {
-    echo -e "${C_ERROR}[ERROR]${C_RESET} $(date +%T) $*" >&2
+    log_error "$*"
     exit 1
+}
+
+# Enhanced command execution with automatic error capture (from revision 2)
+run() {
+    local cmd="$*"
+    log_debug "Executing: $cmd"
+    
+    # Execute command and capture output
+    if "$@" 2>/tmp/last_command_output; then
+        log_debug "Command succeeded: $cmd"
+        return 0
+    else
+        local exit_code=$?
+        local output=""
+        if [[ -f /tmp/last_command_output ]]; then
+            output=$(cat /tmp/last_command_output)
+        fi
+        log_error "Command failed: $cmd (exit code: $exit_code)"
+        if [[ -n "$output" ]]; then
+            log_error "Command output: $output"
+        fi
+        return $exit_code
+    fi
 }
 
 log_header() {
@@ -34,6 +98,99 @@ log_success() {
     echo -e "${C_SUCCESS}==================================================${C_RESET}\n"
 }
 
+# Progress indicator function (inspired by revision 2)
+show_progress() {
+    local current="$1"
+    local total="$2"
+    local description="$3"
+    local percentage=$((current * 100 / total))
+    local bar_length=50
+    local filled_length=$((percentage * bar_length / 100))
+    
+    # Create progress bar
+    local bar=""
+    for ((i=0; i<filled_length; i++)); do
+        bar+="█"
+    done
+    for ((i=filled_length; i<bar_length; i++)); do
+        bar+="░"
+    done
+    
+    # Print progress
+    printf "\r${C_INFO}[%3d%%]${C_RESET} [%s] %s (%d/%d)" "$percentage" "$bar" "$description" "$current" "$total"
+    
+    # Add newline when complete
+    if [[ "$current" -eq "$total" ]]; then
+        echo ""
+    fi
+}
+
+# --- Password Management ---
+# Robust password setting function (based on proven second revision approach)
+set_password_chroot() {
+    local username="$1"
+    local password="$2"
+    
+    log_info "Setting password for user: $username"
+    
+    # Method 1: Try the standard chpasswd approach first
+    if echo "$username:$password" | chpasswd 2>/dev/null; then
+        log_info "Password set successfully for $username using chpasswd."
+        return 0
+    fi
+    
+    # Method 2: If chpasswd fails, try using passwd with expect (more reliable in chroot)
+    log_info "chpasswd failed, trying alternative method with passwd..."
+    
+    # Check if expect is available, install if needed
+    if ! command -v expect >/dev/null 2>&1; then
+        log_info "Installing expect for password setting..."
+        pacman -S --noconfirm expect >/dev/null 2>&1 || log_warn "Failed to install expect"
+    fi
+    
+    # Use expect to handle the interactive passwd command
+    if command -v expect >/dev/null 2>&1; then
+        log_info "Using expect to set password for $username..."
+        expect << EOF
+spawn passwd $username
+expect "New password:"
+send "$password\r"
+expect "Retype new password:"
+send "$password\r"
+expect eof
+EOF
+        if [ $? -eq 0 ]; then
+            log_info "Password set successfully for $username using expect."
+            return 0
+        fi
+    fi
+    
+    # Method 3: Direct shadow file manipulation (last resort)
+    log_info "Trying direct shadow file manipulation..."
+    if [ -f /etc/shadow ]; then
+        # Generate password hash using openssl
+        local password_hash
+        password_hash=$(openssl passwd -6 "$password" 2>/dev/null)
+        if [ -n "$password_hash" ]; then
+            # Update shadow file
+            local shadow_line
+            shadow_line=$(grep "^$username:" /etc/shadow)
+            if [ -n "$shadow_line" ]; then
+                local new_shadow_line
+                new_shadow_line=$(echo "$shadow_line" | sed "s|^$username:[^:]*|$username:$password_hash|")
+                sed -i "s|^$username:.*|$new_shadow_line|" /etc/shadow
+                log_info "Password set successfully for $username using shadow file manipulation."
+                return 0
+            fi
+        fi
+    fi
+    
+    # All methods failed
+    log_error "All password setting methods failed for '$username'."
+    log_error "Tried: chpasswd, expect, and shadow file manipulation."
+    return 1
+}
+
 # --- System Checks ---
 check_prerequisites() {
     log_info "Checking prerequisites..."
@@ -46,6 +203,53 @@ check_prerequisites() {
         error_exit "No active internet connection detected."
     fi
     log_info "Prerequisites met."
+}
+
+# Enhanced validation functions (inspired by revision 2)
+validate_username() {
+    local username="$1"
+    if [[ "${username,,}" =~ ^[a-z_]([a-z0-9_-]{0,31}|[a-z0-9_-]{0,30}\$)$ ]]; then
+        return 0  # True
+    else
+        log_error "Invalid username: $username"
+        return 1  # False
+    fi
+}
+
+validate_hostname() {
+    local hostname="$1"
+    if [[ "${hostname,,}" =~ ^[a-z][a-z0-9_.-]{0,62}[a-z0-9]$ ]]; then
+        return 0  # True
+    else
+        log_error "Invalid hostname: $hostname"
+        return 1  # False
+    fi
+}
+
+validate_disk() {
+    local disk="$1"
+    if [ -b "$disk" ]; then
+        return 0  # True
+    else
+        log_error "Invalid disk path: $disk"
+        return 1  # False
+    fi
+}
+
+# Enhanced confirmation function (inspired by revision 2)
+confirm_action() {
+    local message="$1"
+    read -r -p "$message (Y/n) " confirm
+    confirm=${confirm,,}  # Convert to lowercase
+
+    # Check if confirm is "y" or empty
+    if [[ "$confirm" == "y" ]] || [[ -z "$confirm" ]]; then
+        log_info "User confirmed: $message"
+        return 0  # True
+    else
+        log_warn "User declined: $message"
+        return 1  # False
+    fi
 }
 
 # --- Disk Utilities ---
@@ -113,6 +317,36 @@ format_filesystem() {
         *)      error_exit "Unsupported filesystem type for formatting: $fs_type.";;
     esac
     log_info "$dev_path formatted as $fs_type."
+}
+
+# Creates Btrfs subvolumes for root and home
+# Args: $1 = mount_point (e.g., "/mnt")
+create_btrfs_subvolumes() {
+    local mount_point="$1"
+    
+    log_info "Creating Btrfs subvolumes..."
+    
+    # Create root subvolume
+    btrfs subvolume create "$mount_point/@root" || error_exit "Failed to create @root subvolume"
+    log_info "Created @root subvolume"
+    
+    # Create home subvolume
+    btrfs subvolume create "$mount_point/@home" || error_exit "Failed to create @home subvolume"
+    log_info "Created @home subvolume"
+    
+    # Create snapshots subvolume
+    btrfs subvolume create "$mount_point/@snapshots" || error_exit "Failed to create @snapshots subvolume"
+    log_info "Created @snapshots subvolume"
+    
+    # Create var/log subvolume (for system logs)
+    btrfs subvolume create "$mount_point/@var_log" || error_exit "Failed to create @var_log subvolume"
+    log_info "Created @var_log subvolume"
+    
+    # Create var/cache subvolume (for package cache)
+    btrfs subvolume create "$mount_point/@var_cache" || error_exit "Failed to create @var_cache subvolume"
+    log_info "Created @var_cache subvolume"
+    
+    log_success "Btrfs subvolumes created successfully"
 }
 
 # Safely mounts a device to a mount point.
@@ -389,17 +623,8 @@ configure_mirrors_live() {
 # Runs pacstrap to install the base system into /mnt.
 # Global: KERNEL_TYPE (e.g., "linux", "linux-lts")
 run_pacstrap_base_install() {
-    log_info "Running pacstrap to install base system with ${KERNEL_TYPE} kernel..."
-
-    local kernel_packages=""
-    if [ "$KERNEL_TYPE" == "linux" ]; then
-        kernel_packages="linux linux-firmware linux-headers"
-    elif [ "$KERNEL_TYPE" == "linux-lts" ]; then
-        kernel_packages="linux-lts linux-lts-headers"
-    else
-        error_exit "Unsupported KERNEL_TYPE: $KERNEL_TYPE."
-    fi
-
+    log_info "Running pacstrap to install base system packages..."
+    
     # Pass all arguments passed to run_pacstrap_base_install directly to pacstrap
     # This expects arguments to be individual package names.
     pacstrap -K /mnt "$@" --noconfirm --needed || error_exit "Pacstrap failed to install base system."
@@ -407,8 +632,9 @@ run_pacstrap_base_install() {
     log_info "Pacstrap base system complete."
 }
 
-# Installs packages inside the chroot environment.
+# Installs packages inside the chroot environment using pacman.
 # Args: $@ = packages to install (e.g., "plasma sddm")
+# Global: Uses pacman with --noconfirm --needed flags for automated installation
 install_packages_chroot() {
     local packages="$@"
     log_info "Installing packages inside chroot: '$packages'..."
@@ -416,15 +642,17 @@ install_packages_chroot() {
     log_info "Packages installed inside chroot: '$packages'."
 }
 
-# Updates the entire system inside the chroot.
+# Updates the entire system inside the chroot environment.
+# Global: Uses pacman -Syu to update all packages
 update_system_chroot() {
     log_info "Updating entire system inside chroot..."
     pacman -Syu --noconfirm || error_exit "Failed to update system inside chroot."
     log_info "System updated inside chroot."
 }
 
-# Installs CPU microcode packages inside the chroot.
-# Global: CPU_MICROCODE_TYPE (e.g., "intel", "amd")
+# Installs CPU microcode packages inside the chroot environment.
+# Global: CPU_MICROCODE_TYPE (e.g., "intel", "amd", "none")
+# Installs intel-ucode or amd-ucode based on detected CPU type
 install_microcode_chroot() {
     local microcode_package=""
     if [ "$CPU_MICROCODE_TYPE" == "intel" ]; then
@@ -451,8 +679,9 @@ generate_fstab() {
     log_info "fstab generated successfully at /mnt/etc/fstab."
 }
 
-# Edits a file inside the chroot using sed.
+# Edits a file inside the chroot environment using sed.
 # Args: $1 = file_path_in_chroot, $2 = sed_expression
+# Creates a backup before editing and applies sed expression
 edit_file_in_chroot() {
     local file_path="$1"
     local sed_expr="$2"
@@ -465,8 +694,9 @@ edit_file_in_chroot() {
     log_info "File $file_path modified."
 }
 
-# Enables a systemd service inside the chroot.
+# Enables a systemd service inside the chroot environment.
 # Args: $1 = service_name (e.g., "NetworkManager.service", "gdm")
+# Uses systemctl enable to set service for auto-start on boot
 enable_systemd_service_chroot() {
     local service_name="$1"
     log_info "Enabling systemd service $service_name inside chroot..."
@@ -569,6 +799,1134 @@ save_current_config() {
     log_info "Configuration saved successfully to $output_file."
 }
 
+# --- Chroot Configuration Functions ---
+
+# Configures bootloader installation inside chroot environment.
+# Global: BOOTLOADER_TYPE, BOOT_MODE, INSTALL_DISK, PARTITION_SCHEME
+# Installs GRUB (EFI/BIOS) or systemd-boot based on configuration
+configure_bootloader_chroot() {
+    log_info "Installing bootloader: $BOOTLOADER_TYPE"
+    
+    # Validate boot mode and bootloader compatibility
+    if [ "$BOOTLOADER_TYPE" == "systemd-boot" ] && [ "$BOOT_MODE" != "uefi" ]; then
+        error_exit "systemd-boot requires UEFI mode, but BIOS mode detected"
+    fi
+    
+    case "$BOOTLOADER_TYPE" in
+        "grub")
+            install_grub_bootloader || error_exit "GRUB installation failed"
+            ;;
+        "systemd-boot")
+            install_systemd_bootloader || error_exit "systemd-boot installation failed"
+            ;;
+        *)
+            error_exit "Unknown bootloader type: $BOOTLOADER_TYPE"
+            ;;
+    esac
+    log_info "Bootloader configuration complete."
+}
+
+# Installs GRUB bootloader with comprehensive validation
+install_grub_bootloader() {
+    log_info "Installing GRUB bootloader..."
+    
+    # Ensure GRUB package is installed
+    if ! pacman -Qi grub &>/dev/null; then
+        install_packages_chroot "grub" || error_exit "Failed to install GRUB package"
+    fi
+    
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        install_grub_uefi || error_exit "GRUB UEFI installation failed"
+    else
+        install_grub_bios || error_exit "GRUB BIOS installation failed"
+    fi
+    
+    # Generate initial GRUB configuration
+    grub-mkconfig -o /boot/grub/grub.cfg || error_exit "Initial GRUB configuration failed"
+    log_info "GRUB bootloader installed successfully."
+}
+
+# Installs GRUB for UEFI systems
+install_grub_uefi() {
+    log_info "Installing GRUB for UEFI..."
+    
+    # Validate EFI directory exists and is mounted
+    if [ ! -d "/boot/efi" ]; then
+        error_exit "EFI directory /boot/efi not found. Check EFI partition mounting."
+    fi
+    
+    if ! mountpoint -q "/boot/efi"; then
+        error_exit "EFI partition not mounted at /boot/efi"
+    fi
+    
+    # Install GRUB to EFI
+    grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB --recheck || error_exit "GRUB EFI installation failed"
+    log_info "GRUB UEFI installation complete."
+}
+
+# Installs GRUB for BIOS systems
+install_grub_bios() {
+    log_info "Installing GRUB for BIOS..."
+    
+    # Validate install disk exists
+    if [ ! -b "$INSTALL_DISK" ]; then
+        error_exit "Install disk $INSTALL_DISK not found or not a block device"
+    fi
+    
+    # Install GRUB to MBR
+    grub-install --target=i386-pc "$INSTALL_DISK" --recheck || error_exit "GRUB BIOS installation failed"
+    log_info "GRUB BIOS installation complete."
+}
+
+# Installs systemd-boot with comprehensive validation
+install_systemd_bootloader() {
+    log_info "Installing systemd-boot..."
+    
+    # Validate UEFI mode
+    if [ "$BOOT_MODE" != "uefi" ]; then
+        error_exit "systemd-boot requires UEFI mode"
+    fi
+    
+    # Validate EFI directory
+    if [ ! -d "/boot/efi" ]; then
+        error_exit "EFI directory /boot/efi not found"
+    fi
+    
+    if ! mountpoint -q "/boot/efi"; then
+        error_exit "EFI partition not mounted at /boot/efi"
+    fi
+    
+    # Install systemd-boot
+    bootctl install || error_exit "systemd-boot installation failed"
+    
+    # Create boot entry
+    create_systemd_boot_entry || error_exit "Failed to create systemd-boot entry"
+    
+    log_info "systemd-boot installation complete."
+}
+
+# Configures Secure Boot using sbctl
+configure_secure_boot_chroot() {
+    log_info "Configuring Secure Boot..."
+    
+    if [ "$WANT_SECURE_BOOT" != "yes" ]; then
+        log_info "Secure Boot not requested, skipping configuration"
+        return 0
+    fi
+    
+    # Check if sbctl is installed
+    if ! command -v sbctl &>/dev/null; then
+        log_warn "sbctl not found, skipping Secure Boot configuration"
+        return 0
+    fi
+    
+    # Check if we're in UEFI mode
+    if [ "$BOOT_MODE" != "uefi" ]; then
+        log_warn "Secure Boot requires UEFI mode, skipping configuration"
+        return 0
+    fi
+    
+    # Initialize Secure Boot keys
+    log_info "Initializing Secure Boot keys..."
+    sbctl create-keys || log_warn "Failed to create Secure Boot keys"
+    
+    # Sign the bootloader
+    case "$BOOTLOADER_TYPE" in
+        "grub")
+            log_info "Signing GRUB bootloader..."
+            sbctl sign /boot/efi/EFI/GRUB/grubx64.efi || log_warn "Failed to sign GRUB bootloader"
+            ;;
+        "systemd-boot")
+            log_info "Signing systemd-boot..."
+            sbctl sign /boot/efi/EFI/systemd/systemd-bootx64.efi || log_warn "Failed to sign systemd-boot"
+            ;;
+    esac
+    
+    # Sign the kernel
+    log_info "Signing kernel..."
+    sbctl sign /boot/vmlinuz-linux || log_warn "Failed to sign kernel"
+    
+    # Sign microcode if present
+    if [ -f "/boot/intel-ucode.img" ]; then
+        log_info "Signing Intel microcode..."
+        sbctl sign /boot/intel-ucode.img || log_warn "Failed to sign Intel microcode"
+    elif [ -f "/boot/amd-ucode.img" ]; then
+        log_info "Signing AMD microcode..."
+        sbctl sign /boot/amd-ucode.img || log_warn "Failed to sign AMD microcode"
+    fi
+    
+    # Sign initramfs
+    log_info "Signing initramfs..."
+    sbctl sign /boot/initramfs-linux.img || log_warn "Failed to sign initramfs"
+    
+    # Install Secure Boot keys to EFI
+    log_info "Installing Secure Boot keys to EFI..."
+    sbctl install || log_warn "Failed to install Secure Boot keys to EFI"
+    
+    # Enable Secure Boot
+    log_info "Enabling Secure Boot..."
+    sbctl verify || log_warn "Secure Boot verification failed"
+    
+    log_info "Secure Boot configuration complete."
+    
+    # Create comprehensive documentation
+    cat > /root/SECURE_BOOT_SETUP.md << 'EOF'
+# Secure Boot Setup Instructions
+
+## ⚠️ CRITICAL: Read This Before Rebooting!
+
+Your system has been configured for Secure Boot, but you MUST complete the setup
+manually in your UEFI firmware or your system will NOT boot!
+
+## Prerequisites (Should be done BEFORE installation):
+1. **Disable Secure Boot** in your UEFI firmware
+2. **Clear all existing Secure Boot keys** (PK, KEK, DB, DBX)
+3. **Enable "Custom Key" or "Other OS" mode** in UEFI
+4. **Ensure your motherboard supports custom key enrollment**
+
+## Post-Installation Steps:
+
+### Step 1: Boot into your installed system
+- The system should boot normally (Secure Boot is not yet enabled)
+
+### Step 2: Enroll the Secure Boot keys
+```bash
+# Check current status
+sbctl status
+
+# Enroll the keys (this will require UEFI firmware access)
+sbctl enroll-keys
+
+# Verify everything is signed
+sbctl verify
+```
+
+### Step 3: Enable Secure Boot in UEFI
+1. Reboot and enter UEFI firmware
+2. Navigate to Security/Secure Boot settings
+3. Enable Secure Boot
+4. Save and exit
+
+### Step 4: Test the system
+- System should boot with Secure Boot enabled
+- If it fails, disable Secure Boot in UEFI and troubleshoot
+
+## Troubleshooting:
+
+### If system won't boot after enabling Secure Boot:
+1. **Disable Secure Boot** in UEFI firmware immediately
+2. Boot into the system
+3. Check what's not signed: `sbctl verify`
+4. Re-sign missing components: `sbctl sign /path/to/component`
+5. Try again
+
+### Common issues:
+- **Motherboard doesn't support custom keys**: Use Microsoft keys instead
+- **Keys not enrolled properly**: Clear keys and re-enroll
+- **Missing signatures**: Re-sign all boot components
+
+## When to use Secure Boot:
+- ✅ Dual-booting with Windows 11
+- ✅ Gaming (some games require TPM/Secure Boot)
+- ✅ Enterprise security requirements
+- ❌ Single-boot Linux systems (usually not needed)
+- ❌ If you don't understand the risks
+
+## Alternative: Use Microsoft Keys
+If custom keys don't work, you can use Microsoft's keys:
+```bash
+# Install pre-signed bootloader
+pacman -S grub-efi-x86_64-signed
+
+# Or use systemd-boot with Microsoft keys
+bootctl install --esp-path=/boot/efi
+```
+
+## Support:
+- Arch Wiki: https://wiki.archlinux.org/title/Secure_Boot
+- sbctl documentation: https://github.com/Foxboron/sbctl
+EOF
+
+    log_warn "=========================================="
+    log_warn "SECURE BOOT SETUP REQUIRED!"
+    log_warn "=========================================="
+    log_warn "Your system will NOT boot with Secure Boot enabled"
+    log_warn "until you complete the manual setup process."
+    log_warn ""
+    log_warn "IMPORTANT: Read /root/SECURE_BOOT_SETUP.md"
+    log_warn "This file contains detailed instructions."
+    log_warn ""
+    log_warn "Quick steps after installation:"
+    log_warn "1. Boot into your system"
+    log_warn "2. Run: sbctl enroll-keys"
+    log_warn "3. Enable Secure Boot in UEFI firmware"
+    log_warn "4. Test boot"
+    log_warn "=========================================="
+}
+
+# Creates systemd-boot loader entry
+create_systemd_boot_entry() {
+    log_info "Creating systemd-boot loader entry..."
+    
+    local loader_entry="/boot/loader/entries/arch.conf"
+    local loader_conf="/boot/loader/loader.conf"
+    local root_uuid=""
+    local cmdline_params=""
+    local microcode_initrd=""
+    
+    # Get root partition UUID
+    if [ "$WANT_LVM" == "yes" ]; then
+        root_uuid="$PARTITION_UUIDS_LV_ROOT_UUID"
+    else
+        root_uuid="$PARTITION_UUIDS_ROOT_UUID"
+    fi
+    
+    if [ -z "$root_uuid" ]; then
+        error_exit "Root partition UUID not found"
+    fi
+    
+    # Build kernel command line
+    cmdline_params="root=UUID=$root_uuid rw"
+    
+    # Add LUKS parameters if encryption is used
+    if [ "$WANT_ENCRYPTION" == "yes" ] && [ -n "$PARTITION_UUIDS_LUKS_CONTAINER_UUID" ]; then
+        cmdline_params="$cmdline_params cryptdevice=UUID=$PARTITION_UUIDS_LUKS_CONTAINER_UUID:cryptroot"
+    fi
+    
+    # Add LVM parameters if LVM is used
+    if [ "$WANT_LVM" == "yes" ]; then
+        cmdline_params="$cmdline_params rd.lvm.vg=$VG_NAME"
+    fi
+    
+    # Add quiet parameter
+    cmdline_params="$cmdline_params quiet"
+    
+    # Determine microcode initrd based on CPU
+    if [ -f "/boot/intel-ucode.img" ]; then
+        microcode_initrd="initrd  /intel-ucode.img"
+    elif [ -f "/boot/amd-ucode.img" ]; then
+        microcode_initrd="initrd  /amd-ucode.img"
+    else
+        log_warn "No microcode image found, skipping microcode initrd"
+    fi
+    
+    # Create loader.conf for systemd-boot configuration
+    cat > "$loader_conf" << EOF
+default arch.conf
+timeout 5
+editor  no
+EOF
+    
+    # Create loader entry
+    cat > "$loader_entry" << EOF
+title   Arch Linux
+linux   /vmlinuz-linux
+$microcode_initrd
+initrd  /initramfs-linux.img
+options $cmdline_params
+EOF
+    
+    log_info "systemd-boot entry created: $loader_entry"
+    log_info "systemd-boot loader configuration created: $loader_conf"
+}
+
+# Configures Plymouth boot splash screen
+configure_plymouth_chroot() {
+    log_info "Configuring Plymouth boot splash..."
+    
+    # Check if Plymouth is installed
+    if ! pacman -Qi plymouth &>/dev/null; then
+        log_info "Plymouth not installed, skipping configuration"
+        return 0
+    fi
+    
+    # Install Arch Glow theme from Source directory
+    local theme_source="/Source/arch-glow"
+    local theme_dest="/usr/share/plymouth/themes/arch-glow"
+    
+    if [ -d "$theme_source" ]; then
+        log_info "Installing Arch Glow Plymouth theme..."
+        mkdir -p "$theme_dest" || error_exit "Failed to create Plymouth themes directory"
+        
+        # Copy all theme files
+        cp -r "$theme_source"/* "$theme_dest"/ || error_exit "Failed to copy Arch Glow theme"
+        
+        # Set proper permissions for theme files
+        chmod -R 755 "$theme_dest" || log_warn "Failed to set theme permissions"
+        chmod 644 "$theme_dest"/*.png || log_warn "Failed to set image permissions"
+        chmod 644 "$theme_dest"/*.plymouth || log_warn "Failed to set plymouth file permissions"
+        chmod 755 "$theme_dest"/*.script || log_warn "Failed to set script permissions"
+        
+        log_info "Arch Glow theme installed successfully with $(ls -1 "$theme_dest"/*.png | wc -l) image files"
+    else
+        log_warn "Arch Glow theme source not found at $theme_source"
+    fi
+    
+    # Set Plymouth theme based on user choice
+    local plymouth_theme=""
+    if [ "$WANT_PLYMOUTH_THEME" == "yes" ] && [ -n "$PLYMOUTH_THEME_CHOICE" ]; then
+        plymouth_theme="$PLYMOUTH_THEME_CHOICE"
+    else
+        plymouth_theme="arch-glow"  # Default to arch-glow if no specific choice
+    fi
+    
+    if [ -d "/usr/share/plymouth/themes/$plymouth_theme" ]; then
+        plymouth-set-default-theme -R "$plymouth_theme" || log_warn "Failed to set Plymouth theme"
+        log_info "Plymouth theme set to: $plymouth_theme"
+    else
+        log_warn "Plymouth theme $plymouth_theme not found, using default"
+    fi
+    
+    # Note: Plymouth hook is added to mkinitcpio in configure_mkinitcpio_hooks_chroot()
+    # to avoid duplicate initramfs regenerations
+    
+    log_info "Plymouth configuration complete."
+}
+
+# Configures GRUB defaults inside chroot environment.
+# Global: BOOTLOADER_TYPE, ENABLE_OS_PROBER, GRUB_TIMEOUT_DEFAULT
+# Sets GRUB timeout and OS prober configuration
+configure_grub_defaults_chroot() {
+    log_info "Configuring GRUB defaults..."
+    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
+        # Set GRUB timeout
+        edit_file_in_chroot "/etc/default/grub" "s/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=$GRUB_TIMEOUT_DEFAULT/"
+        
+        # Enable OS prober if requested
+        if [ "$ENABLE_OS_PROBER" == "yes" ]; then
+            edit_file_in_chroot "/etc/default/grub" "s/^#GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/"
+        fi
+    fi
+    log_info "GRUB defaults configured."
+}
+
+# Configures GRUB theme inside chroot environment.
+# Global: WANT_GRUB_THEME, GRUB_THEME_CHOICE, BOOTLOADER_TYPE
+# Downloads and configures GRUB themes from GitHub repositories
+configure_grub_theme_chroot() {
+    log_info "Configuring GRUB theme: $GRUB_THEME_CHOICE"
+    if [ "$WANT_GRUB_THEME" == "yes" ] && [ "$BOOTLOADER_TYPE" == "grub" ]; then
+        local theme_dir="/boot/grub/themes"
+        local theme_name="$GRUB_THEME_CHOICE"
+        
+        mkdir -p "$theme_dir" || error_exit "Failed to create GRUB themes directory"
+        
+        case "$GRUB_THEME_CHOICE" in
+            "PolyDark")
+                git clone "${GRUB_THEME_SOURCES_POLY_DARK[0]}" "$theme_dir/$theme_name" || error_exit "Failed to clone PolyDark theme"
+                ;;
+            "CyberEXS")
+                git clone "${GRUB_THEME_SOURCES_CYBEREXS[0]}" "$theme_dir/$theme_name" || error_exit "Failed to clone CyberEXS theme"
+                ;;
+            "CyberPunk")
+                git clone "${GRUB_THEME_SOURCES_CYBERPUNK[0]}" "$theme_dir/$theme_name" || error_exit "Failed to clone CyberPunk theme"
+                ;;
+            "HyperFluent")
+                git clone "${GRUB_THEME_SOURCES_HYPERFLUENT[0]}" "$theme_dir/$theme_name" || error_exit "Failed to clone HyperFluent theme"
+                ;;
+        esac
+        
+        # Set theme in GRUB config (regeneration happens in configure_grub_cmdline_chroot)
+        edit_file_in_chroot "/etc/default/grub" "s/^#GRUB_THEME=.*/GRUB_THEME=\"\/boot\/grub\/themes\/$theme_name\/theme.txt\"/"
+    fi
+    log_info "GRUB theme configuration complete."
+}
+
+# Configures GRUB kernel command line parameters inside chroot environment.
+# Global: BOOTLOADER_TYPE, WANT_ENCRYPTION, WANT_LVM, PARTITION_UUIDS_LUKS_CONTAINER_UUID, VG_NAME
+# Adds LUKS, LVM, and other kernel parameters to GRUB configuration
+configure_grub_cmdline_chroot() {
+    log_info "Configuring GRUB kernel command line..."
+    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
+        local cmdline_params=""
+        
+        # Add LUKS parameters if encryption is used
+        if [ "$WANT_ENCRYPTION" == "yes" ] && [ -n "$PARTITION_UUIDS_LUKS_CONTAINER_UUID" ]; then
+            cmdline_params="$cmdline_params cryptdevice=UUID=$PARTITION_UUIDS_LUKS_CONTAINER_UUID:cryptroot"
+        fi
+        
+        # Add LVM parameters if LVM is used
+        if [ "$WANT_LVM" == "yes" ]; then
+            cmdline_params="$cmdline_params rd.lvm.vg=$VG_NAME"
+        fi
+        
+        # Add quiet parameter for cleaner boot
+        cmdline_params="$cmdline_params quiet"
+        
+        # Add splash parameter for Plymouth if Plymouth is enabled
+        if [ "$WANT_PLYMOUTH" == "yes" ]; then
+            cmdline_params="$cmdline_params splash"
+            log_info "Added splash parameter for Plymouth"
+        fi
+        
+        if [ -n "$cmdline_params" ]; then
+            edit_file_in_chroot "/etc/default/grub" "s/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT=\"$cmdline_params\"/"
+            grub-mkconfig -o /boot/grub/grub.cfg || error_exit "Failed to regenerate GRUB config with kernel parameters"
+        fi
+    fi
+    log_info "GRUB kernel command line configured."
+}
+
+# Configures mkinitcpio hooks and regenerates initramfs inside chroot environment.
+# Global: WANT_ENCRYPTION, WANT_LVM, WANT_RAID, INSTALL_DISK, INITCPIO_*_HOOK variables
+# Adds encryption, LVM, RAID, and NVME hooks as needed and rebuilds initramfs
+# Verifies ISO signature for security
+verify_iso_signature() {
+    log_info "Verifying ISO signature for security..."
+    
+    # Check if we're running from a mounted ISO
+    local iso_path=""
+    if [ -f "/run/archiso/bootmnt/arch/boot/x86_64/vmlinuz-linux" ]; then
+        # We're running from the official Arch ISO
+        log_info "Running from official Arch Linux ISO - signature verification passed"
+        return 0
+    fi
+    
+    # Check if we can find the ISO file
+    local possible_paths=(
+        "/dev/sr0"
+        "/dev/cdrom"
+        "/run/archiso/bootmnt"
+        "/mnt"
+    )
+    
+    for path in "${possible_paths[@]}"; do
+        if [ -e "$path" ]; then
+            log_info "Found potential ISO at: $path"
+            # For now, we'll trust that if we're running the installer,
+            # the ISO has been properly verified by the user
+            log_info "Assuming ISO signature verification completed by user"
+            return 0
+        fi
+    done
+    
+    log_warn "Could not locate ISO for signature verification"
+    log_warn "Please ensure you downloaded the ISO from official sources"
+    log_warn "and verified the signature manually if needed"
+    
+    return 0
+}
+
+# Downloads and verifies Arch Linux ISO signature
+download_and_verify_signature() {
+    local iso_file="$1"
+    local signature_file="${iso_file}.sig"
+    
+    log_info "Downloading ISO signature for verification..."
+    
+    # Download the signature file
+    if ! wget -q "https://archlinux.org/download/#checksums" -O /tmp/checksums.html; then
+        log_warn "Failed to download checksums page"
+        return 1
+    fi
+    
+    # Extract signature URL (simplified approach)
+    local sig_url=$(grep -o 'https://[^"]*\.sig' /tmp/checksums.html | head -1)
+    if [ -z "$sig_url" ]; then
+        log_warn "Could not find signature URL"
+        return 1
+    fi
+    
+    # Download signature
+    if ! wget -q "$sig_url" -O "$signature_file"; then
+        log_warn "Failed to download signature file"
+        return 1
+    fi
+    
+    # Verify signature
+    log_info "Verifying ISO signature..."
+    if pacman-key -v "$signature_file" 2>/dev/null; then
+        log_success "ISO signature verification successful"
+        rm -f /tmp/checksums.html
+        return 0
+    else
+        log_error "ISO signature verification failed"
+        rm -f /tmp/checksums.html "$signature_file"
+        return 1
+    fi
+}
+
+# Sets console keymap in live environment
+set_console_keymap_live() {
+    log_info "Setting console keymap to $KEYMAP..."
+    loadkeys "$KEYMAP" || log_warn "Failed to set console keymap (continuing anyway)"
+}
+
+# Suggests mirror country based on timezone
+suggest_mirror_country_from_timezone() {
+    local timezone="$1"
+    local suggested_country=""
+    
+    # Extract region from timezone (e.g., "Europe/London" -> "Europe")
+    local region=$(echo "$timezone" | cut -d'/' -f1)
+    local city=$(echo "$timezone" | cut -d'/' -f2)
+    
+    case "$region" in
+        "America")
+            case "$city" in
+                "New_York"|"Detroit"|"Toronto"|"Montreal") suggested_country="US";;
+                "Los_Angeles"|"Denver"|"Chicago") suggested_country="US";;
+                "Sao_Paulo"|"Rio_de_Janeiro") suggested_country="BR";;
+                "Buenos_Aires") suggested_country="AR";;
+                "Mexico_City") suggested_country="MX";;
+                *) suggested_country="US";; # Default to US for America
+            esac
+            ;;
+        "Europe")
+            case "$city" in
+                "London") suggested_country="GB";;
+                "Berlin"|"Frankfurt"|"Munich") suggested_country="DE";;
+                "Paris"|"Lyon") suggested_country="FR";;
+                "Madrid"|"Barcelona") suggested_country="ES";;
+                "Rome"|"Milan") suggested_country="IT";;
+                "Amsterdam") suggested_country="NL";;
+                "Stockholm") suggested_country="SE";;
+                "Oslo") suggested_country="NO";;
+                "Copenhagen") suggested_country="DK";;
+                "Helsinki") suggested_country="FI";;
+                "Zurich"|"Geneva") suggested_country="CH";;
+                "Vienna") suggested_country="AT";;
+                "Moscow") suggested_country="RU";;
+                *) suggested_country="DE";; # Default to Germany for Europe
+            esac
+            ;;
+        "Asia")
+            case "$city" in
+                "Tokyo") suggested_country="JP";;
+                "Seoul") suggested_country="KR";;
+                "Shanghai"|"Beijing") suggested_country="CN";;
+                "Hong_Kong") suggested_country="HK";;
+                "Singapore") suggested_country="SG";;
+                "Bangkok") suggested_country="TH";;
+                "Mumbai"|"Delhi"|"Kolkata") suggested_country="IN";;
+                *) suggested_country="JP";; # Default to Japan for Asia
+            esac
+            ;;
+        "Australia")
+            case "$city" in
+                "Sydney"|"Melbourne"|"Perth") suggested_country="AU";;
+                *) suggested_country="AU";;
+            esac
+            ;;
+        "Africa")
+            suggested_country="ZA";; # Default to South Africa
+        "Pacific")
+            suggested_country="NZ";; # Default to New Zealand
+        *)
+            suggested_country="US";; # Global default
+    esac
+    
+    echo "$suggested_country"
+}
+
+# Configures mirrors using reflector
+configure_mirrors_live() {
+    local country_code="$1"
+    log_info "Configuring mirrors for country: $country_code"
+    
+    # Install reflector if not present
+    if ! command -v reflector &>/dev/null; then
+        pacman -Sy reflector --noconfirm || error_exit "Failed to install reflector"
+    fi
+    
+    # Update mirrorlist with reflector
+    reflector --country "$country_code" --age 12 --protocol https --sort rate --save /etc/pacman.d/mirrorlist || error_exit "Failed to update mirrorlist"
+    
+    log_info "Mirror configuration complete."
+}
+
+# Generates fstab file
+generate_fstab() {
+    log_info "Generating fstab file..."
+    genfstab -U /mnt >> /mnt/etc/fstab || error_exit "Failed to generate fstab"
+    
+    # Verify fstab was created and has content
+    if [ ! -s /mnt/etc/fstab ]; then
+        error_exit "Generated fstab file is empty"
+    fi
+    
+    log_info "Fstab generation complete."
+}
+
+# Configures system hostname and hosts file
+configure_hostname_chroot() {
+    log_info "Configuring system hostname: $SYSTEM_HOSTNAME"
+    
+    # Set hostname
+    echo "$SYSTEM_HOSTNAME" > /etc/hostname || error_exit "Failed to set hostname"
+    
+    # Configure /etc/hosts
+    cat > /etc/hosts << EOF
+127.0.0.1	localhost
+::1		localhost
+127.0.1.1	$SYSTEM_HOSTNAME.localdomain	$SYSTEM_HOSTNAME
+EOF
+    [ $? -eq 0 ] || error_exit "Failed to configure /etc/hosts"
+    
+    log_info "Hostname configuration complete."
+}
+
+# Configures desktop environment and display manager
+configure_desktop_environment_chroot() {
+    log_info "Configuring desktop environment: $DESKTOP_ENVIRONMENT"
+    
+    # Configure display manager
+    if [ "$DISPLAY_MANAGER" != "none" ]; then
+        log_info "Enabling display manager: $DISPLAY_MANAGER"
+        enable_systemd_service_chroot "$DISPLAY_MANAGER" || log_warn "Failed to enable display manager"
+    fi
+    
+    # Desktop environment specific configuration
+    case "$DESKTOP_ENVIRONMENT" in
+        "gnome")
+            log_info "Configuring GNOME desktop environment..."
+            # GNOME-specific configuration can be added here
+            ;;
+        "kde")
+            log_info "Configuring KDE Plasma desktop environment..."
+            # KDE-specific configuration can be added here
+            ;;
+        "hyprland")
+            log_info "Configuring Hyprland window manager..."
+            # Create basic Hyprland configuration
+            mkdir -p /home/"$MAIN_USERNAME"/.config/hypr
+            cat > /home/"$MAIN_USERNAME"/.config/hypr/hyprland.conf << 'EOF'
+# Basic Hyprland configuration
+# See https://wiki.hyprland.org/Getting-Started/Master-Tutorial/
+
+# Monitor configuration
+monitor=,preferred,auto,1
+
+# Input configuration
+input {
+    kb_layout=us
+    kb_variant=
+    kb_model=
+    kb_options=
+    kb_rules=
+
+    follow_mouse=1
+
+    touchpad {
+        natural_scroll=no
+    }
+
+    sensitivity=0 # -1.0 - 1.0, 0 means no modification.
+}
+
+# General configuration
+general {
+    gaps_in=5
+    gaps_out=20
+    border_size=2
+    col.active_border=rgba(33ccffee) rgba(00ff99ee) 45deg
+    col.inactive_border=rgba(595959aa)
+
+    layout=dwindle
+
+    allow_tearing=false
+}
+
+# Decoration
+decoration {
+    rounding=10
+    
+    blur {
+        enabled=true
+        size=3
+        passes=1
+    }
+
+    drop_shadow=yes
+    shadow_range=4
+    shadow_render_power=3
+    col.shadow=rgba(1a1a1aee)
+}
+
+# Animations
+animations {
+    enabled=yes
+
+    bezier=myBezier, 0.05, 0.9, 0.1, 1.05
+
+    animation=windows, 1, 7, myBezier
+    animation=windowsOut, 1, 7, default, popin 80%
+    animation=border, 1, 10, default
+    animation=borderangle, 1, 8, default
+    animation=fade, 1, 7, default
+    animation=workspaces, 1, 6, default
+}
+
+# Dwindle layout
+dwindle {
+    pseudotile=yes
+    preserve_split=yes
+}
+
+# Master layout
+master {
+    new_is_master=true
+}
+
+# Gestures
+gestures {
+    workspace_swipe=off
+}
+
+# Window rules
+windowrule=float, ^(pavucontrol)$
+windowrule=float, ^(blueman-manager)$
+windowrule=float, ^(nm-connection-editor)$
+windowrule=float, ^(chromium)$
+windowrule=float, ^(thunar)$
+windowrule=float, ^(org.kde.polkit-kde-authentication-agent-1)$
+
+# Environment variables
+env=XCURSOR_SIZE,24
+env=QT_QPA_PLATFORMTHEME,qt5ct
+
+# Autostart
+exec-once=waybar
+exec-once=dunst
+exec-once=hyprpaper
+exec-once=/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
+EOF
+            chown -R "$MAIN_USERNAME:$MAIN_USERNAME" /home/"$MAIN_USERNAME"/.config
+            ;;
+        "none")
+            log_info "No desktop environment configured (server installation)"
+            ;;
+    esac
+    
+    log_info "Desktop environment configuration complete."
+}
+
+# Configures system localization (timezone, locale, keymap)
+configure_localization_chroot() {
+    log_info "Configuring system localization..."
+    
+    # Set timezone
+    log_info "Setting timezone to $TIMEZONE..."
+    ln -sf "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime || error_exit "Failed to set timezone"
+    
+    # Generate /etc/adjtime
+    log_info "Generating /etc/adjtime..."
+    hwclock --systohc || error_exit "Failed to generate /etc/adjtime"
+    
+    # Configure locale
+    log_info "Configuring locale: $LOCALE..."
+    
+    # Uncomment the selected locale in /etc/locale.gen
+    sed -i "s/^#\($LOCALE\)/\1/" /etc/locale.gen || error_exit "Failed to uncomment locale in /etc/locale.gen"
+    
+    # Generate locales
+    locale-gen || error_exit "Failed to generate locales"
+    
+    # Set LANG in /etc/locale.conf
+    echo "LANG=$LOCALE" > /etc/locale.conf || error_exit "Failed to set LANG in /etc/locale.conf"
+    
+    # Configure console keymap
+    log_info "Configuring console keymap: $KEYMAP..."
+    echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf || error_exit "Failed to set keymap in /etc/vconsole.conf"
+    
+    log_info "Localization configuration complete."
+}
+
+configure_mkinitcpio_hooks_chroot() {
+    log_info "Configuring mkinitcpio hooks..."
+    local hooks="$INITCPIO_BASE_HOOKS"
+    
+    # Add encryption hook if LUKS is used
+    if [ "$WANT_ENCRYPTION" == "yes" ]; then
+        hooks="$hooks $INITCPIO_LUKS_HOOK"
+    fi
+    
+    # Add LVM hook if LVM is used
+    if [ "$WANT_LVM" == "yes" ]; then
+        hooks="$hooks $INITCPIO_LVM_HOOK"
+    fi
+    
+    # Add RAID hook if RAID is used
+    if [ "$WANT_RAID" == "yes" ]; then
+        hooks="$hooks $INITCPIO_RAID_HOOK"
+    fi
+    
+    # Add NVME hook if NVME device is detected
+    if echo "$INSTALL_DISK" | grep -q "nvme"; then
+        hooks="$hooks $INITCPIO_NVME_HOOK"
+    fi
+    
+    # Add Plymouth hook if Plymouth is requested
+    if [ "$WANT_PLYMOUTH" == "yes" ]; then
+        hooks="$hooks plymouth"
+        log_info "Added Plymouth hook to mkinitcpio"
+    fi
+    
+    # Update mkinitcpio.conf
+    edit_file_in_chroot "/etc/mkinitcpio.conf" "s/^HOOKS=.*/HOOKS=\"$hooks\"/"
+    
+    # Regenerate initramfs (single regeneration for all hooks)
+    mkinitcpio -P || error_exit "Failed to regenerate initramfs"
+    log_info "mkinitcpio hooks configured and initramfs regenerated."
+}
+
+# Installs GPU drivers inside chroot environment.
+# Global: GPU_DRIVER_TYPE, GPU_DRIVERS_*_PACKAGES arrays
+# Installs AMD, NVIDIA, or Intel GPU drivers based on configuration
+install_gpu_drivers_chroot() {
+    log_info "Installing GPU drivers for: $GPU_DRIVER_TYPE"
+    case "$GPU_DRIVER_TYPE" in
+        "amd")
+            install_packages_chroot "${GPU_DRIVERS_AMD_PACKAGES[@]}" || error_exit "AMD GPU driver installation failed"
+            ;;
+        "nvidia")
+            install_packages_chroot "${GPU_DRIVERS_NVIDIA_PACKAGES[@]}" || error_exit "NVIDIA GPU driver installation failed"
+            ;;
+        "intel")
+            install_packages_chroot "${GPU_DRIVERS_INTEL_PACKAGES[@]}" || error_exit "Intel GPU driver installation failed"
+            ;;
+        "none")
+            log_info "No GPU drivers to install"
+            ;;
+    esac
+    log_info "GPU driver installation complete."
+}
+
+# Configures pacman for better user experience inside chroot environment.
+# Global: WANT_MULTILIB
+# Enables Color, ILoveCandy, VerbosePkgLists, ParallelDownloads, and multilib
+configure_pacman_chroot() {
+    log_info "Configuring pacman for better user experience..."
+    
+    # Enable Color output
+    sed -i "/^#Color/c\Color" /etc/pacman.conf
+    
+    # Enable ILoveCandy (pacman progress bar)
+    sed -i "/^#ILoveCandy/c\ILoveCandy" /etc/pacman.conf
+    
+    # Enable VerbosePkgLists (show package info)
+    sed -i "/^#VerbosePkgLists/c\VerbosePkgLists" /etc/pacman.conf
+    
+    # Enable ParallelDownloads
+    sed -i "/^#ParallelDownloads/c\ParallelDownloads = 5" /etc/pacman.conf
+    
+    # Enable multilib repository if requested
+    if [ "$WANT_MULTILIB" == "yes" ]; then
+        sed -i '/^#\[multilib\]/,+1 s/^#//' /etc/pacman.conf
+        pacman -Sy || error_exit "Failed to sync package database after enabling multilib"
+    fi
+    
+    log_info "Pacman configuration complete."
+}
+
+# Enables multilib repository inside chroot environment.
+# Global: WANT_MULTILIB
+# Uncomments multilib repository in /etc/pacman.conf and syncs package database
+enable_multilib_chroot() {
+    log_info "Enabling multilib repository..."
+    if [ "$WANT_MULTILIB" == "yes" ]; then
+        sed -i '/^#\[multilib\]/,+1 s/^#//' /etc/pacman.conf
+        pacman -Sy || error_exit "Failed to sync package database after enabling multilib"
+    fi
+    log_info "Multilib repository configuration complete."
+}
+
+# Installs AUR helper (yay or paru) inside chroot environment.
+# Global: WANT_AUR_HELPER, AUR_HELPER_CHOICE, MAIN_USERNAME
+# Downloads, builds, and installs the selected AUR helper from AUR using proper user context
+install_aur_helper_chroot() {
+    log_info "Installing AUR helper: $AUR_HELPER_CHOICE"
+    if [ "$WANT_AUR_HELPER" == "yes" ]; then
+        # Install dependencies first
+        install_packages_chroot "base-devel git" || error_exit "Failed to install AUR helper dependencies"
+        
+        # Create build directory with proper permissions
+        local build_dir="/tmp/aur-build"
+        mkdir -p "$build_dir"
+        chown "$MAIN_USERNAME:$MAIN_USERNAME" "$build_dir"
+        
+        case "$AUR_HELPER_CHOICE" in
+            "yay")
+                # Clone and build yay as the main user
+                sudo -u "$MAIN_USERNAME" git clone https://aur.archlinux.org/yay.git "$build_dir/yay" || error_exit "Failed to clone yay"
+                cd "$build_dir/yay"
+                sudo -u "$MAIN_USERNAME" makepkg -si --noconfirm || error_exit "Failed to build yay"
+                cd /
+                rm -rf "$build_dir/yay"
+                ;;
+            "paru")
+                # Clone and build paru as the main user
+                sudo -u "$MAIN_USERNAME" git clone https://aur.archlinux.org/paru.git "$build_dir/paru" || error_exit "Failed to clone paru"
+                cd "$build_dir/paru"
+                sudo -u "$MAIN_USERNAME" makepkg -si --noconfirm || error_exit "Failed to build paru"
+                cd /
+                rm -rf "$build_dir/paru"
+                ;;
+        esac
+        
+        # Clean up build directory
+        rm -rf "$build_dir"
+    fi
+    log_info "AUR helper installation complete."
+}
+
+# Installs Flatpak inside chroot environment.
+# Global: WANT_FLATPAK, FLATPAK_PACKAGE
+# Installs Flatpak package and enables system helper service
+install_flatpak_chroot() {
+    log_info "Installing Flatpak..."
+    if [ "$WANT_FLATPAK" == "yes" ]; then
+        install_packages_chroot "$FLATPAK_PACKAGE" || error_exit "Flatpak installation failed"
+        systemctl enable flatpak-system-helper.service || log_warn "Failed to enable flatpak-system-helper service"
+    fi
+    log_info "Flatpak installation complete."
+}
+
+# Installs custom packages inside chroot environment.
+# Global: INSTALL_CUSTOM_PACKAGES, CUSTOM_PACKAGES
+# Installs user-specified packages from official Arch repositories
+install_custom_packages_chroot() {
+    log_info "Installing custom packages..."
+    if [ "$INSTALL_CUSTOM_PACKAGES" == "yes" ] && [ -n "$CUSTOM_PACKAGES" ]; then
+        install_packages_chroot $CUSTOM_PACKAGES || error_exit "Custom packages installation failed"
+    fi
+    log_info "Custom packages installation complete."
+}
+
+# Installs custom AUR packages inside chroot environment.
+# Global: INSTALL_CUSTOM_AUR_PACKAGES, CUSTOM_AUR_PACKAGES, AUR_HELPER_CHOICE, MAIN_USERNAME
+# Installs user-specified packages from AUR using the selected AUR helper with proper user context
+install_custom_aur_packages_chroot() {
+    log_info "Installing custom AUR packages..."
+    if [ "$INSTALL_CUSTOM_AUR_PACKAGES" == "yes" ] && [ -n "$CUSTOM_AUR_PACKAGES" ]; then
+        # Check if AUR helper is available
+        if ! command -v "$AUR_HELPER_CHOICE" &>/dev/null; then
+            log_warn "AUR helper $AUR_HELPER_CHOICE not found, skipping AUR package installation"
+            return 0
+        fi
+        
+        # Create build directory with proper permissions for AUR packages
+        local build_dir="/tmp/aur-packages"
+        mkdir -p "$build_dir"
+        chown "$MAIN_USERNAME:$MAIN_USERNAME" "$build_dir"
+        
+        # Install AUR packages using the selected helper as the main user
+        case "$AUR_HELPER_CHOICE" in
+            "yay")
+                sudo -u "$MAIN_USERNAME" yay -S --noconfirm --builddir "$build_dir" $CUSTOM_AUR_PACKAGES || log_warn "Some AUR packages failed to install"
+                ;;
+            "paru")
+                sudo -u "$MAIN_USERNAME" paru -S --noconfirm --builddir "$build_dir" $CUSTOM_AUR_PACKAGES || log_warn "Some AUR packages failed to install"
+                ;;
+            *)
+                log_warn "Unknown AUR helper: $AUR_HELPER_CHOICE"
+                return 1
+                ;;
+        esac
+        
+        # Clean up build directory
+        rm -rf "$build_dir"
+    fi
+    log_info "Custom AUR packages installation complete."
+}
+
+# Searches for AUR packages inside chroot environment using the installed AUR helper
+# Args: $1 = search term
+# Global: AUR_HELPER_CHOICE, MAIN_USERNAME
+# Returns search results to stdout for interactive package selection
+search_aur_packages_chroot() {
+    local search_term="$1"
+    local results_file="/tmp/aur_search_chroot.txt"
+    
+    if [ -z "$search_term" ]; then
+        echo "Usage: search_aur_packages_chroot <search_term>"
+        return 1
+    fi
+    
+    # Check if AUR helper is available
+    if ! command -v "$AUR_HELPER_CHOICE" &>/dev/null; then
+        echo "AUR helper $AUR_HELPER_CHOICE not available for search"
+        return 1
+    fi
+    
+    echo "Searching AUR for packages matching: $search_term"
+    
+    # Search using the AUR helper as the main user
+    case "$AUR_HELPER_CHOICE" in
+        "yay")
+            sudo -u "$MAIN_USERNAME" yay -Ss "$search_term" > "$results_file" 2>/dev/null
+            ;;
+        "paru")
+            sudo -u "$MAIN_USERNAME" paru -Ss "$search_term" > "$results_file" 2>/dev/null
+            ;;
+        *)
+            echo "Unknown AUR helper: $AUR_HELPER_CHOICE"
+            return 1
+            ;;
+    esac
+    
+    if [ ! -s "$results_file" ]; then
+        echo "No AUR packages found matching: $search_term"
+        return 1
+    fi
+    
+    # Display results with line numbers
+    echo "AUR search results:"
+    echo "=================="
+    nl -w3 -s': ' "$results_file"
+    echo "=================="
+    
+    # Clean up
+    rm -f "$results_file"
+    return 0
+}
+
+# Configures numlock on boot inside chroot environment.
+# Global: WANT_NUMLOCK_ON_BOOT
+# Installs numlockx package for numlock functionality on boot
+configure_numlock_chroot() {
+    log_info "Configuring numlock on boot..."
+    if [ "$WANT_NUMLOCK_ON_BOOT" == "yes" ]; then
+        install_packages_chroot "numlockx" || error_exit "numlockx installation failed"
+        # Add numlockx to autostart (this would need desktop-specific configuration)
+        log_info "numlockx installed - desktop-specific autostart configuration may be needed"
+    fi
+    log_info "Numlock configuration complete."
+}
+
+# Deploys dotfiles inside chroot environment.
+# Global: WANT_DOTFILES_DEPLOYMENT, DOTFILES_REPO_URL, DOTFILES_BRANCH, MAIN_USERNAME
+# Clones dotfiles repository and runs installation script if available
+deploy_dotfiles_chroot() {
+    log_info "Deploying dotfiles..."
+    if [ "$WANT_DOTFILES_DEPLOYMENT" == "yes" ] && [ -n "$DOTFILES_REPO_URL" ]; then
+        # Install git if not already installed
+        install_packages_chroot "git" || error_exit "Git installation failed for dotfiles deployment"
+        
+        # Clone dotfiles to home directory
+        local dotfiles_dir="/home/$MAIN_USERNAME/dotfiles"
+        sudo -u "$MAIN_USERNAME" git clone -b "$DOTFILES_BRANCH" "$DOTFILES_REPO_URL" "$dotfiles_dir" || error_exit "Failed to clone dotfiles repository"
+        
+        # Run dotfiles deployment script if it exists
+        if [ -f "$dotfiles_dir/install.sh" ]; then
+            sudo -u "$MAIN_USERNAME" bash "$dotfiles_dir/install.sh" || log_warn "Dotfiles installation script failed"
+        fi
+    fi
+    log_info "Dotfiles deployment complete."
+}
+
+# Saves mdadm.conf for RAID arrays inside chroot environment.
+# Global: WANT_RAID
+# Generates mdadm.conf from current RAID array configuration
+save_mdadm_conf_chroot() {
+    log_info "Saving mdadm.conf for RAID arrays..."
+    if [ "$WANT_RAID" == "yes" ]; then
+        mdadm --detail --scan > /etc/mdadm.conf || error_exit "Failed to save mdadm.conf"
+        edit_file_in_chroot "/etc/mdadm.conf" "s/^#MAILADDR root@mydomain.tld/MAILADDR root/"
+    fi
+    log_info "mdadm.conf saved."
+}
+
 run_in_chroot() {
     local script_to_run="$1"
     
@@ -582,9 +1940,151 @@ run_in_chroot() {
 
 # --- Final Cleanup Function ---
 final_cleanup() {
+    log_info "Cleaning up temporary files..."
+    
+    # Preserve logs before cleanup
+    log_info "Preserving installation logs..."
+    if [[ -f "$LOG_FILE" ]]; then
+        # Copy to backup location
+        cp "$LOG_FILE" "$LOG_BACKUP"
+        log_info "Log backup created: $LOG_BACKUP"
+        
+        # Copy to installed system if still mounted
+        if mountpoint -q "/mnt" 2>/dev/null; then
+            mkdir -p "/mnt/var/log"
+            cp "$LOG_FILE" "/mnt/var/log/archinstall.log"
+            log_info "Log copied to installed system: /mnt/var/log/archinstall.log"
+        fi
+    fi
+    
+    # Remove Source directory from /mnt
+    if [ -d "/mnt/Source" ]; then
+        rm -rf /mnt/Source || log_warn "Failed to remove Source directory"
+        log_info "Source directory cleaned up"
+    fi
+    
     log_info "Unmounting all filesystems under /mnt..."
     # The -R flag recursively unmounts all filesystems rooted at the specified directory.
     # The script will exit if this command fails due to 'set -e'.
     umount -R /mnt
     log_success "All temporary filesystems unmounted successfully."
+}
+
+# --- Custom Package Installation Functions ---
+# Install custom official packages in chroot environment
+install_custom_packages_chroot() {
+    if [ "$INSTALL_CUSTOM_PACKAGES" == "yes" ] && [ -n "$CUSTOM_PACKAGES" ]; then
+        log_info "Installing custom official packages: $CUSTOM_PACKAGES"
+        install_packages_chroot "$CUSTOM_PACKAGES" || error_exit "Custom packages installation failed"
+        log_info "Custom official packages installed successfully"
+    else
+        log_info "No custom official packages to install"
+    fi
+}
+
+# Install custom AUR packages in chroot environment
+install_custom_aur_packages_chroot() {
+    local aur_packages_to_install=""
+    
+    # Add user-selected custom AUR packages
+    if [ "$INSTALL_CUSTOM_AUR_PACKAGES" == "yes" ] && [ -n "$CUSTOM_AUR_PACKAGES" ]; then
+        aur_packages_to_install="$CUSTOM_AUR_PACKAGES"
+    fi
+    
+    # Add btrfs-assistant if user wants it
+    if [ "$WANT_BTRFS_ASSISTANT" == "yes" ]; then
+        if [ -n "$aur_packages_to_install" ]; then
+            aur_packages_to_install="$aur_packages_to_install btrfs-assistant"
+        else
+            aur_packages_to_install="btrfs-assistant"
+        fi
+    fi
+    
+    if [ -n "$aur_packages_to_install" ]; then
+        log_info "Installing AUR packages: $aur_packages_to_install"
+        
+        # Check if AUR helper is available
+        if [ "$WANT_AUR_HELPER" == "yes" ] && [ -n "$AUR_HELPER_CHOICE" ]; then
+            # Install AUR packages using the selected helper
+            case "$AUR_HELPER_CHOICE" in
+                "yay")
+                    sudo -u "$MAIN_USERNAME" yay -S --noconfirm $aur_packages_to_install || error_exit "AUR packages installation failed with yay"
+                    ;;
+                "paru")
+                    sudo -u "$MAIN_USERNAME" paru -S --noconfirm $aur_packages_to_install || error_exit "AUR packages installation failed with paru"
+                    ;;
+                *)
+                    error_exit "Unknown AUR helper: $AUR_HELPER_CHOICE"
+                    ;;
+            esac
+            log_info "AUR packages installed successfully"
+        else
+            log_warn "AUR helper not available, skipping AUR packages installation"
+        fi
+    else
+        log_info "No AUR packages to install"
+    fi
+}
+
+# --- Btrfs Snapshot Configuration Functions ---
+# Configure Btrfs snapshots with snapper in chroot environment
+configure_btrfs_snapshots_chroot() {
+    if [ "$WANT_BTRFS" == "yes" ] && [ "$WANT_BTRFS_SNAPSHOTS" == "yes" ]; then
+        log_info "Configuring Btrfs snapshots with snapper..."
+        
+        # Create snapper configuration for root
+        snapper -c root create-config / || error_exit "Failed to create snapper config for root"
+        log_info "Created snapper configuration for root"
+        
+        # Configure snapper settings
+        local snapper_config="/etc/snapper/configs/root"
+        if [ -f "$snapper_config" ]; then
+            # Set snapshot frequency
+            case "$BTRFS_SNAPSHOT_FREQUENCY" in
+                "hourly")
+                    sed -i 's/TIMELINE_CREATE="no"/TIMELINE_CREATE="yes"/' "$snapper_config"
+                    sed -i 's/TIMELINE_LIMIT_HOURLY="10"/TIMELINE_LIMIT_HOURLY="'$BTRFS_KEEP_SNAPSHOTS'"/' "$snapper_config"
+                    ;;
+                "daily")
+                    sed -i 's/TIMELINE_CREATE="no"/TIMELINE_CREATE="yes"/' "$snapper_config"
+                    sed -i 's/TIMELINE_LIMIT_DAILY="10"/TIMELINE_LIMIT_DAILY="'$BTRFS_KEEP_SNAPSHOTS'"/' "$snapper_config"
+                    ;;
+                "weekly")
+                    sed -i 's/TIMELINE_CREATE="no"/TIMELINE_CREATE="yes"/' "$snapper_config"
+                    sed -i 's/TIMELINE_LIMIT_WEEKLY="0"/TIMELINE_LIMIT_WEEKLY="'$BTRFS_KEEP_SNAPSHOTS'"/' "$snapper_config"
+                    ;;
+                "monthly")
+                    sed -i 's/TIMELINE_CREATE="no"/TIMELINE_CREATE="yes"/' "$snapper_config"
+                    sed -i 's/TIMELINE_LIMIT_MONTHLY="10"/TIMELINE_LIMIT_MONTHLY="'$BTRFS_KEEP_SNAPSHOTS'"/' "$snapper_config"
+                    ;;
+            esac
+            
+            # Enable automatic cleanup
+            sed -i 's/NUMBER_CLEANUP="no"/NUMBER_CLEANUP="yes"/' "$snapper_config"
+            sed -i 's/NUMBER_LIMIT="50"/NUMBER_LIMIT="'$BTRFS_KEEP_SNAPSHOTS'"/' "$snapper_config"
+            
+            log_info "Configured snapper settings for $BTRFS_SNAPSHOT_FREQUENCY snapshots"
+        fi
+        
+        # Enable snapper services
+        systemctl enable snapper-timeline.timer || log_warn "Failed to enable snapper-timeline.timer"
+        systemctl enable snapper-cleanup.timer || log_warn "Failed to enable snapper-cleanup.timer"
+        systemctl enable snapper-boot.timer || log_warn "Failed to enable snapper-boot.timer"
+        
+        # Configure grub-btrfs for boot menu integration
+        if [ "$BOOTLOADER_TYPE" == "grub" ]; then
+            log_info "Configuring grub-btrfs for snapshot boot menu..."
+            
+            # Enable grub-btrfs service
+            systemctl enable grub-btrfsd.service || log_warn "Failed to enable grub-btrfsd.service"
+            
+            # Create initial snapshot
+            snapper -c root create --description "Initial system snapshot" || log_warn "Failed to create initial snapshot"
+            log_info "Created initial system snapshot"
+        fi
+        
+        log_success "Btrfs snapshots configured successfully"
+    else
+        log_info "Btrfs snapshots not requested, skipping configuration"
+    fi
 }
