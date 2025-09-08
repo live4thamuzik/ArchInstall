@@ -1153,9 +1153,15 @@ configure_plymouth_chroot() {
         
         # Set proper permissions for theme files
         chmod -R 755 "$theme_dest" || log_warn "Failed to set theme permissions"
-        chmod 644 "$theme_dest"/*.png || log_warn "Failed to set image permissions"
-        chmod 644 "$theme_dest"/*.plymouth || log_warn "Failed to set plymouth file permissions"
-        chmod 755 "$theme_dest"/*.script || log_warn "Failed to set script permissions"
+        chmod 644 "$theme_dest"/*.png 2>/dev/null || log_warn "Failed to set image permissions"
+        chmod 644 "$theme_dest"/*.plymouth 2>/dev/null || log_warn "Failed to set plymouth file permissions"
+        chmod 755 "$theme_dest"/*.script 2>/dev/null || log_warn "Failed to set script permissions"
+        
+        # Ensure the main script is executable
+        if [ -f "$theme_dest/arch-glow.script" ]; then
+            chmod +x "$theme_dest/arch-glow.script" || log_warn "Failed to make arch-glow.script executable"
+            log_info "Made arch-glow.script executable"
+        fi
         
         log_info "Arch Glow theme installed successfully with $(ls -1 "$theme_dest"/*.png | wc -l) image files"
     else

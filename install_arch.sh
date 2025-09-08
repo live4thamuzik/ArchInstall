@@ -60,6 +60,12 @@ main() {
     
     log_info "Copying Source directory to /mnt..."
     cp -r ./Source /mnt || error_exit "Failed to copy Source directory to chroot."
+    
+    # Ensure Plymouth script is executable in the copied location
+    if [ -f "/mnt/Source/arch-glow/arch-glow.script" ]; then
+        chmod +x /mnt/Source/arch-glow/arch-glow.script || log_warn "Failed to make Plymouth script executable in chroot"
+        log_info "Made Plymouth script executable in chroot environment"
+    fi
 
     # Verify the files exist at the destination
     if [ ! -f "/mnt/chroot_config.sh" ] || \
@@ -73,103 +79,73 @@ main() {
     log_info "Setting permissions for chroot scripts..."
     chmod +x /mnt/*.sh || error_exit "Failed to make chroot scripts executable."
     
+    # --- Export Variables (same method as working ArchL4TM version) ---
     log_info "Exporting variables for chroot environment..."
-    
-    # Debug: Show key variables before export
-    log_info "Debug - Key variables before export:"
-    log_info "  MAIN_USERNAME: '$MAIN_USERNAME'"
-    log_info "  ROOT_PASSWORD: '${ROOT_PASSWORD:0:3}***'"
-    log_info "  MAIN_USER_PASSWORD: '${MAIN_USER_PASSWORD:0:3}***'"
-    log_info "  SYSTEM_HOSTNAME: '$SYSTEM_HOSTNAME'"
-    
-    export PARTITION_UUIDS_EFI_UUID PARTITION_UUIDS_EFI_PARTUUID PARTITION_UUIDS_ROOT_UUID PARTITION_UUIDS_BOOT_UUID PARTITION_UUIDS_SWAP_UUID PARTITION_UUIDS_HOME_UUID PARTITION_UUIDS_LUKS_CONTAINER_UUID PARTITION_UUIDS_LV_ROOT_UUID PARTITION_UUIDS_LV_SWAP_UUID PARTITION_UUIDS_LV_HOME_UUID
-    export LUKS_CRYPTROOT_DEV LV_ROOT_PATH LV_SWAP_PATH LV_HOME_PATH VG_NAME
-    export KERNEL_TYPE CPU_MICROCODE_TYPE TIMEZONE LOCALE KEYMAP REFLECTOR_COUNTRY_CODE SYSTEM_HOSTNAME
-    export ROOT_PASSWORD MAIN_USERNAME MAIN_USER_PASSWORD
-    export DESKTOP_ENVIRONMENT DISPLAY_MANAGER GPU_DRIVER_TYPE BOOTLOADER_TYPE ENABLE_OS_PROBER WANT_SECURE_BOOT TIME_SYNC_CHOICE LOCALE KEYMAP TIMEZONE REFLECTOR_COUNTRY_CODE SYSTEM_HOSTNAME CPU_MICROCODE_TYPE VERIFY_ISO_SIGNATURE
-    export WANT_MULTILIB WANT_AUR_HELPER AUR_HELPER_CHOICE WANT_FLATPAK
-    export INSTALL_CUSTOM_PACKAGES CUSTOM_PACKAGES INSTALL_CUSTOM_AUR_PACKAGES CUSTOM_AUR_PACKAGES
-    export WANT_GRUB_THEME GRUB_THEME_CHOICE WANT_NUMLOCK_ON_BOOT WANT_PLYMOUTH WANT_PLYMOUTH_THEME PLYMOUTH_THEME_CHOICE
-    export WANT_DOTFILES_DEPLOYMENT DOTFILES_REPO_URL DOTFILES_BRANCH
-    export WANT_LVM WANT_ENCRYPTION WANT_RAID RAID_LEVEL
-    export ROOT_FILESYSTEM_TYPE HOME_FILESYSTEM_TYPE WANT_BTRFS WANT_BTRFS_SNAPSHOTS WANT_BTRFS_ASSISTANT BTRFS_SNAPSHOT_FREQUENCY BTRFS_KEEP_SNAPSHOTS
+    export MAIN_USERNAME
+    export ROOT_PASSWORD
+    export MAIN_USER_PASSWORD
+    export SYSTEM_HOSTNAME
+    export TIMEZONE
+    export LOCALE
+    export KEYMAP
+    export DESKTOP_ENVIRONMENT
+    export DISPLAY_MANAGER
+    export BOOTLOADER_TYPE
+    export WANT_SECURE_BOOT
+    export WANT_AUR_HELPER
+    export AUR_HELPER_CHOICE
+    export WANT_GRUB_THEME
+    export GRUB_THEME_CHOICE
+    export WANT_PLYMOUTH
+    export WANT_PLYMOUTH_THEME
+    export PLYMOUTH_THEME_CHOICE
+    export WANT_BTRFS
+    export WANT_BTRFS_SNAPSHOTS
+    export BTRFS_SNAPSHOT_FREQUENCY
+    export BTRFS_KEEP_SNAPSHOTS
+    export WANT_ENCRYPTION
+    export WANT_LVM
+    export WANT_RAID
+    export RAID_LEVEL
+    export ROOT_FILESYSTEM_TYPE
+    export HOME_FILESYSTEM_TYPE
+    export KERNEL_TYPE
+    export CPU_MICROCODE_TYPE
+    export TIME_SYNC_CHOICE
+    export GPU_DRIVER_TYPE
+    export WANT_MULTILIB
+    export WANT_FLATPAK
+    export INSTALL_CUSTOM_PACKAGES
+    export CUSTOM_PACKAGES
+    export INSTALL_CUSTOM_AUR_PACKAGES
+    export CUSTOM_AUR_PACKAGES
+    export WANT_NUMLOCK_ON_BOOT
+    export WANT_DOTFILES_DEPLOYMENT
+    export DOTFILES_REPO_URL
+    export DOTFILES_BRANCH
+    export VERIFY_ISO_SIGNATURE
+    export REFLECTOR_COUNTRY_CODE
+    export ENABLE_OS_PROBER
+    export WANT_BTRFS_ASSISTANT
+    export PARTITION_UUIDS_EFI_UUID
+    export PARTITION_UUIDS_EFI_PARTUUID
+    export PARTITION_UUIDS_ROOT_UUID
+    export PARTITION_UUIDS_BOOT_UUID
+    export PARTITION_UUIDS_SWAP_UUID
+    export PARTITION_UUIDS_HOME_UUID
+    export PARTITION_UUIDS_LUKS_CONTAINER_UUID
+    export PARTITION_UUIDS_LV_ROOT_UUID
+    export PARTITION_UUIDS_LV_SWAP_UUID
+    export PARTITION_UUIDS_LV_HOME_UUID
+    export LUKS_CRYPTROOT_DEV
+    export LV_ROOT_PATH
+    export LV_SWAP_PATH
+    export LV_HOME_PATH
+    export VG_NAME
     export -a RAID_DEVICES
 
     log_info "Executing chroot configuration script inside chroot..."
-    
-    # Debug: Show key variables before chroot
-    log_info "Debug - Key variables before chroot:"
-    log_info "  MAIN_USERNAME: '$MAIN_USERNAME'"
-    log_info "  ROOT_PASSWORD: '${ROOT_PASSWORD:0:3}***'"
-    log_info "  MAIN_USER_PASSWORD: '${MAIN_USER_PASSWORD:0:3}***'"
-    log_info "  SYSTEM_HOSTNAME: '$SYSTEM_HOSTNAME'"
-    
-    # Use the proven method from the working version - pass variables directly
-    arch-chroot /mnt /bin/bash -c "
-        export MAIN_USERNAME='$MAIN_USERNAME'
-        export ROOT_PASSWORD='$ROOT_PASSWORD'
-        export MAIN_USER_PASSWORD='$MAIN_USER_PASSWORD'
-        export SYSTEM_HOSTNAME='$SYSTEM_HOSTNAME'
-        export TIMEZONE='$TIMEZONE'
-        export LOCALE='$LOCALE'
-        export KEYMAP='$KEYMAP'
-        export DESKTOP_ENVIRONMENT='$DESKTOP_ENVIRONMENT'
-        export DISPLAY_MANAGER='$DISPLAY_MANAGER'
-        export BOOTLOADER_TYPE='$BOOTLOADER_TYPE'
-        export WANT_SECURE_BOOT='$WANT_SECURE_BOOT'
-        export WANT_AUR_HELPER='$WANT_AUR_HELPER'
-        export AUR_HELPER_CHOICE='$AUR_HELPER_CHOICE'
-        export WANT_GRUB_THEME='$WANT_GRUB_THEME'
-        export GRUB_THEME_CHOICE='$GRUB_THEME_CHOICE'
-        export WANT_PLYMOUTH='$WANT_PLYMOUTH'
-        export WANT_PLYMOUTH_THEME='$WANT_PLYMOUTH_THEME'
-        export PLYMOUTH_THEME_CHOICE='$PLYMOUTH_THEME_CHOICE'
-        export WANT_BTRFS='$WANT_BTRFS'
-        export WANT_BTRFS_SNAPSHOTS='$WANT_BTRFS_SNAPSHOTS'
-        export BTRFS_SNAPSHOT_FREQUENCY='$BTRFS_SNAPSHOT_FREQUENCY'
-        export BTRFS_KEEP_SNAPSHOTS='$BTRFS_KEEP_SNAPSHOTS'
-        export WANT_ENCRYPTION='$WANT_ENCRYPTION'
-        export WANT_LVM='$WANT_LVM'
-        export WANT_RAID='$WANT_RAID'
-        export RAID_LEVEL='$RAID_LEVEL'
-        export ROOT_FILESYSTEM_TYPE='$ROOT_FILESYSTEM_TYPE'
-        export HOME_FILESYSTEM_TYPE='$HOME_FILESYSTEM_TYPE'
-        export KERNEL_TYPE='$KERNEL_TYPE'
-        export CPU_MICROCODE_TYPE='$CPU_MICROCODE_TYPE'
-        export TIME_SYNC_CHOICE='$TIME_SYNC_CHOICE'
-        export GPU_DRIVER_TYPE='$GPU_DRIVER_TYPE'
-        export WANT_MULTILIB='$WANT_MULTILIB'
-        export WANT_FLATPAK='$WANT_FLATPAK'
-        export INSTALL_CUSTOM_PACKAGES='$INSTALL_CUSTOM_PACKAGES'
-        export CUSTOM_PACKAGES='$CUSTOM_PACKAGES'
-        export INSTALL_CUSTOM_AUR_PACKAGES='$INSTALL_CUSTOM_AUR_PACKAGES'
-        export CUSTOM_AUR_PACKAGES='$CUSTOM_AUR_PACKAGES'
-        export WANT_NUMLOCK_ON_BOOT='$WANT_NUMLOCK_ON_BOOT'
-        export WANT_DOTFILES_DEPLOYMENT='$WANT_DOTFILES_DEPLOYMENT'
-        export DOTFILES_REPO_URL='$DOTFILES_REPO_URL'
-        export DOTFILES_BRANCH='$DOTFILES_BRANCH'
-        export VERIFY_ISO_SIGNATURE='$VERIFY_ISO_SIGNATURE'
-        export REFLECTOR_COUNTRY_CODE='$REFLECTOR_COUNTRY_CODE'
-        export ENABLE_OS_PROBER='$ENABLE_OS_PROBER'
-        export WANT_BTRFS_ASSISTANT='$WANT_BTRFS_ASSISTANT'
-        export PARTITION_UUIDS_EFI_UUID='$PARTITION_UUIDS_EFI_UUID'
-        export PARTITION_UUIDS_EFI_PARTUUID='$PARTITION_UUIDS_EFI_PARTUUID'
-        export PARTITION_UUIDS_ROOT_UUID='$PARTITION_UUIDS_ROOT_UUID'
-        export PARTITION_UUIDS_BOOT_UUID='$PARTITION_UUIDS_BOOT_UUID'
-        export PARTITION_UUIDS_SWAP_UUID='$PARTITION_UUIDS_SWAP_UUID'
-        export PARTITION_UUIDS_HOME_UUID='$PARTITION_UUIDS_HOME_UUID'
-        export PARTITION_UUIDS_LUKS_CONTAINER_UUID='$PARTITION_UUIDS_LUKS_CONTAINER_UUID'
-        export PARTITION_UUIDS_LV_ROOT_UUID='$PARTITION_UUIDS_LV_ROOT_UUID'
-        export PARTITION_UUIDS_LV_SWAP_UUID='$PARTITION_UUIDS_LV_SWAP_UUID'
-        export PARTITION_UUIDS_LV_HOME_UUID='$PARTITION_UUIDS_LV_HOME_UUID'
-        export LUKS_CRYPTROOT_DEV='$LUKS_CRYPTROOT_DEV'
-        export LV_ROOT_PATH='$LV_ROOT_PATH'
-        export LV_SWAP_PATH='$LV_SWAP_PATH'
-        export LV_HOME_PATH='$LV_HOME_PATH'
-        export VG_NAME='$VG_NAME'
-        export RAID_DEVICES='${RAID_DEVICES[@]}'
-        ./chroot_config.sh
-    " || error_exit "Chroot configuration failed."
+    arch-chroot /mnt /bin/bash -c "LOG_FILE=$LOG_FILE ./chroot_config.sh" || error_exit "Chroot configuration failed."
     log_info "Chroot setup complete."
     
     # Stage 5: Finalization
