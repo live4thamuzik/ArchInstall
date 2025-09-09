@@ -50,7 +50,7 @@ do_auto_simple_partitioning() {
         log_info "Creating EFI partition (${EFI_PART_SIZE_MIB}MiB)..."
         # Create EFI partition with sgdisk: -n 1:0:+size -t 1:EF00
         local efi_size_mb="${EFI_PART_SIZE_MIB}M"
-        sgdisk -n 1:0:+"$efi_size_mb" -t 1:EF00 "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
+        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:EF00" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
         partprobe "$INSTALL_DISK"
         part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
         
@@ -174,7 +174,7 @@ do_auto_luks_lvm_partitioning() {
         log_info "Creating EFI partition (${EFI_PART_SIZE_MIB}MiB)..."
         # Create EFI partition with sgdisk: -n 1:0:+size -t 1:EF00
         local efi_size_mb="${EFI_PART_SIZE_MIB}M"
-        sgdisk -n 1:0:+"$efi_size_mb" -t 1:EF00 "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
+        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:EF00" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
         partprobe "$INSTALL_DISK"
         part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
         
@@ -252,7 +252,7 @@ do_auto_raid_luks_lvm_partitioning() {
         # 1. EFI partition on each disk (if UEFI)
         if [ "$BOOT_MODE" == "uefi" ]; then
             local efi_size_mb="${EFI_PART_SIZE_MIB}M"
-            sgdisk -n 1:0:+"$efi_size_mb" -t 1:EF00 "$disk" || error_exit "Failed to create EFI partition on $disk."
+            sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:EF00" "$disk" || error_exit "Failed to create EFI partition on $disk."
             current_start_mib=$((current_start_mib + EFI_PART_SIZE_MIB))
         fi
 

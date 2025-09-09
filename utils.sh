@@ -335,13 +335,29 @@ create_btrfs_subvolumes() {
 safe_mount() {
     local dev="$1"
     local mnt="$2"
+    
+    # Debug: Check if device exists
+    log_info "DEBUG: Device path: $dev"
+    log_info "DEBUG: Mount point: $mnt"
+    if [ ! -b "$dev" ]; then
+        error_exit "Device $dev does not exist or is not a block device."
+    fi
+    
     mkdir -p "$mnt" || error_exit "Failed to create mount point $mnt."
     log_info "Mounting $dev to $mnt..."
     
     # For EFI partitions, use specific mount options
     if [[ "$mnt" == *"/boot/efi"* ]]; then
         log_info "Mounting EFI partition with specific options..."
+        log_info "DEBUG: About to mount EFI partition $dev to $mnt"
         mount -t vfat -o rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro "$dev" "$mnt" || error_exit "Failed to mount EFI partition $dev to $mnt."
+        log_info "DEBUG: EFI partition mounted successfully"
+        # Verify the mount worked
+        if [ ! -d "$mnt" ] || [ -z "$(ls -A "$mnt" 2>/dev/null)" ]; then
+            log_warn "DEBUG: EFI mount point $mnt appears empty or not accessible"
+        else
+            log_info "DEBUG: EFI mount point $mnt is accessible and contains files"
+        fi
     else
         mount "$dev" "$mnt" || error_exit "Failed to mount $dev to $mnt."
     fi
