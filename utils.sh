@@ -672,6 +672,20 @@ configure_default_editor_chroot() {
         ln -sf /usr/bin/nvim /usr/bin/vim || log_warn "Could not create vim symlink to nvim"
     fi
 
+    # Ensure visudo/sudoedit use nvim irrespective of environment
+    local sudoers_editor_file="/etc/sudoers.d/00-editor"
+    {
+        echo "Defaults editor=/usr/bin/nvim"
+        echo "Defaults env_editor"
+    } > "$sudoers_editor_file" || error_exit "Failed to write $sudoers_editor_file"
+    chmod 440 "$sudoers_editor_file" || error_exit "Failed to set permissions on $sudoers_editor_file"
+
+    # Validate sudoers configuration
+    if ! visudo -cf /etc/sudoers; then
+        log_error "sudoers validation failed after editor configuration"
+        return 1
+    fi
+
     log_success "Default editor configured to Neovim"
 }
 
