@@ -649,7 +649,7 @@ install_packages_chroot() {
 # Installs essential extras inside chroot (beyond base, linux, linux-firmware)
 # Includes editors, docs, networking, fs utils, and storage stacks based on config
 install_essential_extras_chroot() {
-    local packages="sudo man-db man-pages texinfo nano neovim bash-completion git curl networkmanager network-manager-applet iwd archlinux-keyring base-devel lvm2 pipewire btop openssh parallel"
+    local packages="sudo man-db man-pages texinfo nano neovim bash-completion git curl networkmanager network-manager-applet iwd archlinux-keyring base-devel pipewire btop openssh parallel exfat-utils unzip p7zip rsync wget tree which less dfc"
 
     # Filesystem utilities
     if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ] || [ "$HOME_FILESYSTEM_TYPE" == "btrfs" ]; then
@@ -1355,6 +1355,21 @@ configure_grub_cmdline_chroot() {
     log_info "Configuring GRUB kernel command line..."
     if [ "$BOOTLOADER_TYPE" == "grub" ]; then
         local cmdline_params=""
+        local root_uuid=""
+        
+        # Get root partition UUID
+        if [ "$WANT_LVM" == "yes" ]; then
+            root_uuid="$PARTITION_UUIDS_LV_ROOT_UUID"
+        else
+            root_uuid="$PARTITION_UUIDS_ROOT_UUID"
+        fi
+        
+        if [ -z "$root_uuid" ]; then
+            error_exit "Root partition UUID not found for GRUB configuration"
+        fi
+        
+        # Add root parameter with UUID
+        cmdline_params="root=UUID=$root_uuid rw"
         
         # Add LUKS parameters if encryption is used
         if [ "$WANT_ENCRYPTION" == "yes" ] && [ -n "$PARTITION_UUIDS_LUKS_CONTAINER_UUID" ]; then
@@ -2010,6 +2025,13 @@ run_in_chroot() {
     local script_to_run="$1"
     
     log_info "Executing chroot script: ${script_to_run}"
+    
+    # Bind-mount EFI partition if it exists in the live environment
+    if mountpoint -q "/mnt/boot/efi"; then
+        log_info "Bind-mounting EFI partition for chroot access..."
+        mount --bind /mnt/boot/efi /mnt/boot/efi || log_warn "Failed to bind-mount EFI partition"
+    fi
+    
     # arch-chroot handles mounting /proc, /sys, /dev, etc. automatically
     arch-chroot /mnt /bin/bash -c "${script_to_run}" || error_exit "Chroot script execution failed: ${script_to_run}"
     

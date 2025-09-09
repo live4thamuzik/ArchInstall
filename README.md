@@ -101,6 +101,56 @@ ArchInstall is designed for users who want the power and flexibility of Arch Lin
 
 ---
 
+## 📦 Base Packages Included
+
+ArchInstall automatically installs a comprehensive set of essential packages beyond the minimal `base` and `base-devel` groups. This ensures your system is ready for daily use without requiring additional package installation.
+
+### **Core System Packages:**
+- **`sudo`** - Privilege escalation
+- **`man-db`**, **`man-pages`**, **`texinfo`** - Documentation system
+- **`nano`**, **`neovim`** - Text editors
+- **`bash-completion`** - Shell command completion
+- **`git`**, **`curl`** - Development and networking tools
+- **`networkmanager`**, **`iwd`** - Network management
+- **`archlinux-keyring`** - Package verification
+- **`base-devel`** - Development tools (gcc, make, etc.)
+- **`pipewire`** - Audio system
+- **`btop`** - System monitor
+- **`openssh`** - Remote access
+- **`parallel`** - Parallel processing
+
+### **File System & Archive Tools:**
+- **`exfat-utils`** - exFAT filesystem support
+- **`unzip`** - ZIP archive extraction
+- **`p7zip`** - 7-Zip archive support (RAR, 7z, etc.)
+- **`rsync`** - File synchronization
+- **`wget`** - Alternative download tool
+- **`tree`** - Directory structure visualization
+- **`which`** - Command location finder
+- **`less`** - Enhanced pager
+- **`dfc`** - Colored disk usage display
+
+### **Conditional Packages (Installed Only When Needed):**
+- **`lvm2`** - Logical Volume Manager (LVM setups only)
+- **`mdadm`** - Software RAID management (RAID setups only)
+- **`btrfs-progs`** - Btrfs filesystem tools (Btrfs setups only)
+- **`e2fsprogs`** - ext4 filesystem tools (ext4 setups only)
+- **`xfsprogs`** - XFS filesystem tools (XFS setups only)
+
+### **Why This Matters:**
+- **No Bloat** - Only installs what you actually need based on your configuration
+- **Transparency** - You know exactly what's being installed
+- **Efficiency** - Avoids duplicate package installation during additional package selection
+- **Ready to Use** - System is functional immediately after installation
+
+### **Package Selection Tips:**
+- **Check the list above** before adding packages during installation
+- **Avoid duplicates** - Don't add packages that are already included
+- **Consider your setup** - LVM/RAID users get additional tools automatically
+- **Customize as needed** - Add desktop environments, applications, and AUR packages
+
+---
+
 ## 📁 Project Structure
 
 ```
