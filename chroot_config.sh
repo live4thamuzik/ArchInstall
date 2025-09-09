@@ -80,29 +80,40 @@ main_chroot_config() {
     # --- Phase 1: Basic System Configuration ---
     _log_info "Configuring pacman for better user experience..."
     configure_pacman_chroot || _log_error "Pacman configuration failed."
-    
+
+    # Microcode before other additions
+    _log_info "Installing CPU microcode..."
+    install_microcode_chroot || _log_error "CPU Microcode installation failed."
+
+    # Essential extras beyond pacstrap base: editors, docs, fs utils, storage stacks
+    _log_info "Installing essential extra packages..."
+    install_essential_extras_chroot || _log_error "Essential extra packages installation failed."
+
+    # Set Neovim as default editor
+    _log_info "Setting Neovim as default editor..."
+    configure_default_editor_chroot || _log_error "Failed to set Neovim as default editor."
+
+    # Enable core services early
+    _log_info "Enabling core services..."
+    enable_systemd_service_chroot "NetworkManager" || _log_error "Failed to enable NetworkManager service."
+    case "$TIME_SYNC_CHOICE" in
+        "ntpd") enable_systemd_service_chroot "ntpd" || _log_error "Failed to enable ntpd service." ;;
+        "chrony") enable_systemd_service_chroot "chronyd" || _log_error "Failed to enable chronyd service." ;;
+        "systemd-timesyncd") enable_systemd_service_chroot "systemd-timesyncd" || _log_error "Failed to enable systemd-timesyncd service." ;;
+    esac
+
+    # Locale > Timezone > Initramfs as requested
     _log_info "Configuring system localization..."
     configure_localization_chroot || _log_error "Localization configuration failed."
 
-    _log_info "Configuring hostname and basic user setup."
-    configure_hostname_chroot || _log_error "Hostname configuration failed."
+    _log_info "Updating initramfs..."
+    configure_mkinitcpio_hooks_chroot || _log_error "Mkinitpio hooks configuration or initramfs rebuild failed."
 
-    _log_info "Setting up user account: $MAIN_USERNAME..."
-    
-    # Map archinstall variables to user management function variables
+    # User and password, then hostname, then sudoers
+    _log_info "Preparing user credentials and account..."
     USERNAME="$MAIN_USERNAME"
     USER_PASSWORD="$MAIN_USER_PASSWORD"
-    
-    # Set root password first to ensure system security
-    _log_info "Setting root password..."
-    if echo "root:$ROOT_PASSWORD" | chpasswd; then
-        _log_success "Root password set successfully"
-    else
-        _log_error "Failed to set root password (exit code: $?)"
-        exit 1
-    fi
-    
-    # Create user account with proper groups and home directory
+
     _log_info "Creating user account: $USERNAME"
     if create_user "$USERNAME"; then
         _log_success "User account creation completed successfully"
@@ -110,17 +121,15 @@ main_chroot_config() {
         _log_error "User account creation failed"
         exit 1
     fi
-    
-    # Set user password after account creation
-    _log_info "Setting user password for: $USERNAME"
-    if echo "$USERNAME:$USER_PASSWORD" | chpasswd; then
-        _log_success "User password set successfully for: $USERNAME"
-    else
-        _log_error "Failed to set user password for: $USERNAME (exit code: $?)"
+
+    if ! set_passwords "$USERNAME" "$USER_PASSWORD" "$ROOT_PASSWORD"; then
+        _log_error "Setting passwords failed"
         exit 1
     fi
-    
-    # Configure sudoers to enable wheel group sudo access
+
+    _log_info "Configuring hostname..."
+    configure_hostname_chroot || _log_error "Hostname configuration failed."
+
     _log_info "Configuring sudoers file..."
     if update_sudoers; then
         _log_success "sudoers configuration completed successfully"
@@ -143,7 +152,7 @@ main_chroot_config() {
         _log_info "Skipping GRUB-specific configurations (systemd-boot selected)"
     fi
 
-    configure_mkinitpio_hooks_chroot || _log_error "Mkinitpio hooks configuration or initramfs rebuild failed."
+    # mkinitcpio already handled earlier
 
     # Configure Plymouth only if GRUB is selected (systemd-boot has limited Plymouth support)
     if [ "$WANT_PLYMOUTH" == "yes" ]; then

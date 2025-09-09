@@ -206,25 +206,6 @@ check_prerequisites() {
 }
 
 # Enhanced validation functions (inspired by revision 2)
-validate_username() {
-    local username="$1"
-    if [[ "${username,,}" =~ ^[a-z_]([a-z0-9_-]{0,31}|[a-z0-9_-]{0,30}\$)$ ]]; then
-        return 0  # True
-    else
-        log_error "Invalid username: $username"
-        return 1  # False
-    fi
-}
-
-validate_hostname() {
-    local hostname="$1"
-    if [[ "${hostname,,}" =~ ^[a-z][a-z0-9_.-]{0,62}[a-z0-9]$ ]]; then
-        return 0  # True
-    else
-        log_error "Invalid hostname: $hostname"
-        return 1  # False
-    fi
-}
 
 validate_disk() {
     local disk="$1"
@@ -640,6 +621,58 @@ install_packages_chroot() {
     log_info "Installing packages inside chroot: '$packages'..."
     pacman -S --noconfirm --needed $packages || error_exit "Failed to install packages inside chroot: '$packages'."
     log_info "Packages installed inside chroot: '$packages'."
+}
+
+# Installs essential extras inside chroot (beyond base, linux, linux-firmware)
+# Includes editors, docs, networking, fs utils, and storage stacks based on config
+install_essential_extras_chroot() {
+    local packages="sudo man-db man-pages texinfo nano neovim bash-completion git curl networkmanager"
+
+    # Filesystem utilities
+    if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ] || [ "$HOME_FILESYSTEM_TYPE" == "btrfs" ]; then
+        packages="$packages btrfs-progs"
+    fi
+    if [ "$ROOT_FILESYSTEM_TYPE" == "ext4" ] || [ "$HOME_FILESYSTEM_TYPE" == "ext4" ]; then
+        packages="$packages e2fsprogs"
+    fi
+    if [ "$ROOT_FILESYSTEM_TYPE" == "xfs" ] || [ "$HOME_FILESYSTEM_TYPE" == "xfs" ]; then
+        packages="$packages xfsprogs"
+    fi
+
+    # LVM / RAID utilities
+    if [ "$WANT_LVM" == "yes" ]; then
+        packages="$packages lvm2"
+    fi
+    if [ "$WANT_RAID" == "yes" ]; then
+        packages="$packages mdadm"
+    fi
+
+    log_info "Installing essential extra packages inside chroot: $packages"
+    install_packages_chroot $packages
+}
+
+# Sets Neovim as the default system editor inside chroot
+configure_default_editor_chroot() {
+    log_info "Configuring Neovim as the default system editor..."
+
+    # Create a profile.d file to export EDITOR and VISUAL for all users
+    local profile_d_file="/etc/profile.d/00-editor.sh"
+    {
+        echo "export EDITOR=/usr/bin/nvim"
+        echo "export VISUAL=/usr/bin/nvim"
+        echo "export SUDO_EDITOR=/usr/bin/nvim"
+    } > "$profile_d_file" || error_exit "Failed to write $profile_d_file"
+    chmod 644 "$profile_d_file" || error_exit "Failed to set permissions on $profile_d_file"
+
+    # Provide common editor aliases when vim is not installed
+    if [ ! -e "/usr/bin/vi" ]; then
+        ln -sf /usr/bin/nvim /usr/bin/vi || log_warn "Could not create vi symlink to nvim"
+    fi
+    if [ ! -e "/usr/bin/vim" ]; then
+        ln -sf /usr/bin/nvim /usr/bin/vim || log_warn "Could not create vim symlink to nvim"
+    fi
+
+    log_success "Default editor configured to Neovim"
 }
 
 # Updates the entire system inside the chroot environment.
@@ -2109,6 +2142,7 @@ validate_hostname() {
 
 # --- User Input Functions ---
 get_username() {
+    log_info "DEBUG: get_username function called"
     log_info "Prompting for username..."
     while true; do
         read -r -p "Enter a username: " username
@@ -2124,6 +2158,7 @@ get_username() {
 }
 
 get_user_password() {
+    log_info "DEBUG: get_user_password function called"
     log_info "Prompting for user password..."
     while true; do
         read -rs -p "Set a password for $USERNAME: " USER_PASSWORD1
@@ -2148,6 +2183,7 @@ get_user_password() {
 }
 
 get_root_password() {
+    log_info "DEBUG: get_root_password function called"
     log_info "Prompting for root password..."
     while true; do
         read -rs -p "Set root password: " ROOT_PASSWORD1
@@ -2232,41 +2268,51 @@ create_user() {
 
 set_passwords() {
     log_info "Setting passwords in correct order..."
-    
-    # Validate required variables
-    if [[ -z "$USERNAME" ]]; then
-        log_error "set_passwords: USERNAME variable is not set"
+
+    # Support both parameter-based and environment-variable-based invocation
+    local username_param="${1:-}"
+    local user_password_param="${2:-}"
+    local root_password_param="${3:-}"
+
+    # Resolve effective values with clear precedence: parameters > env vars
+    local effective_username="${username_param:-$USERNAME}"
+    local effective_user_password="${user_password_param:-$USER_PASSWORD}"
+    local effective_root_password="${root_password_param:-$ROOT_PASSWORD}"
+
+    # Validate required values
+    if [[ -z "$effective_username" ]]; then
+        log_error "set_passwords: username is empty"
         return 1
     fi
-    
-    if [[ -z "$USER_PASSWORD" ]]; then
-        log_error "set_passwords: USER_PASSWORD variable is not set"
+
+    if [[ -z "$effective_user_password" ]]; then
+        log_error "set_passwords: user password is empty"
         return 1
     fi
-    
-    if [[ -z "$ROOT_PASSWORD" ]]; then
-        log_error "set_passwords: ROOT_PASSWORD variable is not set"
+
+    if [[ -z "$effective_root_password" ]]; then
+        log_error "set_passwords: root password is empty"
         return 1
     fi
-    
+
     # Set root password first to ensure system security
     log_info "Setting root password..."
-    if echo "root:$ROOT_PASSWORD" | chpasswd; then
+    if echo "root:$effective_root_password" | chpasswd; then
         log_success "Root password set successfully"
     else
         log_error "Failed to set root password (exit code: $?)"
         return 1
     fi
-    
+
     # Set user password after root password is secured
-    log_info "Setting user password for: $USERNAME"
-    if echo "$USERNAME:$USER_PASSWORD" | chpasswd; then
-        log_success "User password set successfully for: $USERNAME"
+    log_info "Setting user password for: $effective_username"
+    if echo "$effective_username:$effective_user_password" | chpasswd; then
+        log_success "User password set successfully for: $effective_username"
     else
-        log_error "Failed to set user password for: $USERNAME (exit code: $?)"
+        log_error "Failed to set user password for: $effective_username (exit code: $?)"
         return 1
     fi
-    
+
     log_success "All passwords set successfully"
     return 0
 }

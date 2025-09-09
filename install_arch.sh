@@ -181,6 +181,13 @@ main() {
     export -a GRUB_THEME_SOURCES_CYBERPUNK
     export -a GRUB_THEME_SOURCES_HYPERFLUENT
 
+    # Debug: Show variables before passing to chroot
+    log_info "Debug - Variables before arch-chroot:"
+    log_info "  MAIN_USERNAME: '${MAIN_USERNAME:-NOT_SET}'"
+    log_info "  ROOT_PASSWORD: '${ROOT_PASSWORD:+SET}' (length: ${#ROOT_PASSWORD})"
+    log_info "  MAIN_USER_PASSWORD: '${MAIN_USER_PASSWORD:+SET}' (length: ${#MAIN_USER_PASSWORD})"
+    log_info "  SYSTEM_HOSTNAME: '${SYSTEM_HOSTNAME:-NOT_SET}'"
+
     log_info "Executing chroot configuration script inside chroot..."
     arch-chroot /mnt /bin/bash -c "LOG_FILE=$LOG_FILE MAIN_USERNAME='$MAIN_USERNAME' ROOT_PASSWORD='$ROOT_PASSWORD' MAIN_USER_PASSWORD='$MAIN_USER_PASSWORD' SYSTEM_HOSTNAME='$SYSTEM_HOSTNAME' USERNAME='$MAIN_USERNAME' USER_PASSWORD='$MAIN_USER_PASSWORD' HOSTNAME='$SYSTEM_HOSTNAME' ENCRYPTION_PASSWORD='$LUKS_PASSPHRASE' TIMEZONE='$TIMEZONE' LOCALE='$LOCALE' KEYMAP='$KEYMAP' DESKTOP_ENVIRONMENT='$DESKTOP_ENVIRONMENT' DISPLAY_MANAGER='$DISPLAY_MANAGER' BOOTLOADER_TYPE='$BOOTLOADER_TYPE' BOOT_MODE='$BOOT_MODE' OVERRIDE_BOOT_MODE='$OVERRIDE_BOOT_MODE' WANT_SECURE_BOOT='$WANT_SECURE_BOOT' WANT_AUR_HELPER='$WANT_AUR_HELPER' AUR_HELPER_CHOICE='$AUR_HELPER_CHOICE' WANT_GRUB_THEME='$WANT_GRUB_THEME' GRUB_THEME_CHOICE='$GRUB_THEME_CHOICE' WANT_PLYMOUTH='$WANT_PLYMOUTH' WANT_PLYMOUTH_THEME='$WANT_PLYMOUTH_THEME' PLYMOUTH_THEME_CHOICE='$PLYMOUTH_THEME_CHOICE' WANT_BTRFS='$WANT_BTRFS' WANT_BTRFS_SNAPSHOTS='$WANT_BTRFS_SNAPSHOTS' BTRFS_SNAPSHOT_FREQUENCY='$BTRFS_SNAPSHOT_FREQUENCY' BTRFS_KEEP_SNAPSHOTS='$BTRFS_KEEP_SNAPSHOTS' WANT_ENCRYPTION='$WANT_ENCRYPTION' WANT_LVM='$WANT_LVM' WANT_RAID='$WANT_RAID' RAID_LEVEL='$RAID_LEVEL' ROOT_FILESYSTEM_TYPE='$ROOT_FILESYSTEM_TYPE' HOME_FILESYSTEM_TYPE='$HOME_FILESYSTEM_TYPE' KERNEL_TYPE='$KERNEL_TYPE' CPU_MICROCODE_TYPE='$CPU_MICROCODE_TYPE' TIME_SYNC_CHOICE='$TIME_SYNC_CHOICE' GPU_DRIVER_TYPE='$GPU_DRIVER_TYPE' WANT_MULTILIB='$WANT_MULTILIB' WANT_FLATPAK='$WANT_FLATPAK' INSTALL_CUSTOM_PACKAGES='$INSTALL_CUSTOM_PACKAGES' CUSTOM_PACKAGES='$CUSTOM_PACKAGES' INSTALL_CUSTOM_AUR_PACKAGES='$INSTALL_CUSTOM_AUR_PACKAGES' CUSTOM_AUR_PACKAGES='$CUSTOM_AUR_PACKAGES' WANT_NUMLOCK_ON_BOOT='$WANT_NUMLOCK_ON_BOOT' WANT_DOTFILES_DEPLOYMENT='$WANT_DOTFILES_DEPLOYMENT' DOTFILES_REPO_URL='$DOTFILES_REPO_URL' DOTFILES_BRANCH='$DOTFILES_BRANCH' REFLECTOR_COUNTRY_CODE='$REFLECTOR_COUNTRY_CODE' ENABLE_OS_PROBER='$ENABLE_OS_PROBER' WANT_BTRFS_ASSISTANT='$WANT_BTRFS_ASSISTANT' WANT_SWAP='$WANT_SWAP' WANT_HOME_PARTITION='$WANT_HOME_PARTITION' LUKS_PASSPHRASE='$LUKS_PASSPHRASE' INSTALL_DISK='$INSTALL_DISK' ./chroot_config.sh" || error_exit "Chroot configuration failed."
     log_info "Chroot setup complete."
@@ -248,122 +255,21 @@ handle_installation_interrupt() {
 # Helper function for base system installation (simplified approach based on proven second revision)
 install_base_system_target() {
     log_info "Installing base system packages into /mnt..."
-    
-    # Start with essential packages (like second revision)
-    local base_packages="base expect"
-    
-    # Add kernel packages based on user choice
+
+    # Strictly essential pacstrap: base + kernel + firmware (+ headers)
+    local essential_packages="base"
     if [ "$KERNEL_TYPE" == "linux" ]; then
-        base_packages="$base_packages linux linux-firmware linux-headers"
+        essential_packages="$essential_packages linux linux-firmware linux-headers"
     elif [ "$KERNEL_TYPE" == "linux-lts" ]; then
-        base_packages="$base_packages linux-lts linux-firmware linux-lts-headers"
+        essential_packages="$essential_packages linux-lts linux-firmware linux-lts-headers"
     else
         error_exit "Unsupported KERNEL_TYPE: $KERNEL_TYPE."
     fi
-    
-    # Add essential system packages
-    base_packages="$base_packages base-devel networkmanager"
-    
-    # Add bootloader packages
-    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
-        base_packages="$base_packages grub efibootmgr os-prober"
-    elif [ "$BOOTLOADER_TYPE" == "systemd-boot" ]; then
-        base_packages="$base_packages systemd-boot"
-    fi
-    
-    # Add filesystem utilities
-    if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ] || [ "$HOME_FILESYSTEM_TYPE" == "btrfs" ]; then
-        base_packages="$base_packages btrfs-progs"
-        WANT_BTRFS="yes"
-    fi
-    if [ "$ROOT_FILESYSTEM_TYPE" == "ext4" ] || [ "$HOME_FILESYSTEM_TYPE" == "ext4" ]; then
-        base_packages="$base_packages e2fsprogs"
-    fi
-    if [ "$ROOT_FILESYSTEM_TYPE" == "xfs" ] || [ "$HOME_FILESYSTEM_TYPE" == "xfs" ]; then
-        base_packages="$base_packages xfsprogs"
-    fi
-    
-    # Add LVM/RAID tools if needed
-    if [ "$WANT_LVM" == "yes" ]; then
-        base_packages="$base_packages lvm2"
-    fi
-    if [ "$WANT_RAID" == "yes" ]; then
-        base_packages="$base_packages mdadm"
-    fi
-    
-    # Add CPU microcode
-    if [ "$CPU_MICROCODE_TYPE" == "intel" ]; then
-        base_packages="$base_packages intel-ucode"
-    elif [ "$CPU_MICROCODE_TYPE" == "amd" ]; then
-        base_packages="$base_packages amd-ucode"
-    fi
-    
-    # Add time sync packages
-    case "$TIME_SYNC_CHOICE" in
-        "ntpd")
-            base_packages="$base_packages ntp"
-            ;;
-        "chrony")
-            base_packages="$base_packages chrony"
-            ;;
-        "systemd-timesyncd")
-            base_packages="$base_packages systemd-timesyncd"
-            ;;
-    esac
-    
-    # Add Btrfs snapshot packages if requested
-    if [ "$WANT_BTRFS" == "yes" ] && [ "$WANT_BTRFS_SNAPSHOTS" == "yes" ]; then
-        base_packages="$base_packages snapper grub-btrfs"
-    fi
-    
-    # Add desktop environment packages
-    case "$DESKTOP_ENVIRONMENT" in
-        "gnome")
-            base_packages="$base_packages gnome gnome-extra gnome-tweaks firefox"
-            ;;
-        "kde")
-            base_packages="$base_packages plasma-desktop sddm kde-applications dolphin firefox"
-            ;;
-        "hyprland")
-            base_packages="$base_packages hyprland waybar swww kitty firefox"
-            ;;
-        "none")
-            # No desktop environment packages
-            ;;
-    esac
-    
-    # Add display manager packages
-    case "$DISPLAY_MANAGER" in
-        "gdm")
-            base_packages="$base_packages gdm"
-            ;;
-        "sddm")
-            base_packages="$base_packages sddm"
-            ;;
-        "none")
-            # No display manager packages
-            ;;
-    esac
-    
-    # Add other essential packages
-    base_packages="$base_packages sudo man-db man-pages vim nano bash-completion git curl"
-    
-    # Add Plymouth if requested
-    if [ "$WANT_PLYMOUTH" == "yes" ]; then
-        base_packages="$base_packages plymouth"
-    fi
-    
-    # Add Secure Boot tools if requested
-    if [ "$WANT_SECURE_BOOT" == "yes" ]; then
-        base_packages="$base_packages sbctl"
-    fi
-    
-    log_info "Installing packages: $base_packages"
-    
-    # Use the proven approach from second revision
-    pacstrap -K /mnt $base_packages --noconfirm --needed || error_exit "Pacstrap failed to install base system."
 
-    log_info "Base system installation complete on target."
+    log_info "Pacstrap essentials: $essential_packages"
+    pacstrap -K /mnt $essential_packages --noconfirm --needed || error_exit "Pacstrap failed to install essential base system."
+
+    log_info "Base essentials installed on target."
 }
 
 # --- Call the main function with error handling ---

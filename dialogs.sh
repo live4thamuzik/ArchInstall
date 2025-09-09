@@ -468,6 +468,7 @@ gather_installation_details() {
 
     # User Credentials - Gather user account information
     log_info "Gathering user account information..."
+    log_info "DEBUG: About to call get_username function..."
     
     if get_username; then
         log_success "Username input completed successfully"
@@ -503,7 +504,14 @@ gather_installation_details() {
     export MAIN_USER_PASSWORD
     export ROOT_PASSWORD
     export SYSTEM_HOSTNAME
-    
+
+    # Debug: Show what we just set
+    log_info "Debug - Variables set in dialogs:"
+    log_info "  MAIN_USERNAME: '${MAIN_USERNAME:-NOT_SET}'"
+    log_info "  ROOT_PASSWORD: '${ROOT_PASSWORD:+SET}' (length: ${#ROOT_PASSWORD})"
+    log_info "  MAIN_USER_PASSWORD: '${MAIN_USER_PASSWORD:+SET}' (length: ${#MAIN_USER_PASSWORD})"
+    log_info "  SYSTEM_HOSTNAME: '${SYSTEM_HOSTNAME:-NOT_SET}'"
+
     log_success "User account configuration completed successfully"
 
     # Desktop Environment and Display Manager.
