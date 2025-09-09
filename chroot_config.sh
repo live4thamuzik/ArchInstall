@@ -106,10 +106,8 @@ _log_success() { echo -e "\n\e[32;1m============================================
         "systemd-timesyncd") enable_systemd_service_chroot "systemd-timesyncd" || _log_error "Failed to enable systemd-timesyncd service." ;;
     esac
 
-    # Locale > Timezone > Initramfs as requested
+    # Locale > Timezone as requested (initramfs moved later to avoid multiple rebuilds)
     configure_localization_chroot || _log_error "Localization configuration failed."
-
-    configure_mkinitcpio_hooks_chroot || _log_error "Mkinitpio hooks configuration or initramfs rebuild failed."
 
     # User and password, then hostname, then sudoers
     USERNAME="$MAIN_USERNAME"
@@ -142,15 +140,12 @@ _log_success() { echo -e "\n\e[32;1m============================================
 
     configure_grub_defaults_chroot || _log_error "GRUB default configuration failed."
 
-    # Configure GRUB-specific options only if GRUB is selected
+    # Configure GRUB theme only (final GRUB config after initramfs rebuild)
     if [ "$BOOTLOADER_TYPE" == "grub" ]; then
         configure_grub_theme_chroot || _log_error "GRUB theme configuration failed."
-        configure_grub_cmdline_chroot || _log_error "GRUB kernel command line configuration failed."
     else
         _log_info "Skipping GRUB-specific configurations (systemd-boot selected)"
     fi
-
-    # mkinitcpio already handled earlier
 
     # Configure Plymouth only if GRUB is selected (systemd-boot has limited Plymouth support)
     if [ "$WANT_PLYMOUTH" == "yes" ]; then
@@ -164,6 +159,14 @@ _log_success() { echo -e "\n\e[32;1m============================================
         fi
     else
         _log_info "Skipping Plymouth configuration (not requested)"
+    fi
+
+    # With Plymouth/GPU in place, configure mkinitcpio hooks and rebuild initramfs once
+    configure_mkinitcpio_hooks_chroot || _log_error "Mkinitpio hooks configuration or initramfs rebuild failed."
+
+    # Finalize GRUB cmdline and regenerate GRUB config once
+    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
+        configure_grub_cmdline_chroot || _log_error "GRUB kernel command line configuration failed."
     fi
 
     _log_info "Configuring Secure Boot..."
@@ -194,10 +197,6 @@ _log_success() { echo -e "\n\e[32;1m============================================
     
     _log_info "Installing GPU Drivers..."
     install_gpu_drivers_chroot || _log_error "GPU driver installation failed."
-
-    _log_info "Installing CPU Microcode..."
-    install_microcode_chroot || _log_error "CPU Microcode installation failed."
-
 
     # --- Phase 4: Optional Software & User Customization ---
     # Multilib repository is now handled in configure_pacman_chroot()
@@ -242,19 +241,7 @@ _log_success() { echo -e "\n\e[32;1m============================================
     _log_info "Configuring desktop environment and display manager..."
     configure_desktop_environment_chroot || _log_error "Desktop environment configuration failed."
 
-    # --- Phase 8: Optional AUR/Custom & Finalizations ---
-    _log_info "Installing AUR Helper..."
-    install_aur_helper_chroot || _log_error "AUR Helper installation failed."
-
-    _log_info "Installing Custom Packages..."
-    install_custom_packages_chroot || _log_error "Custom packages installation failed."
-
-    _log_info "Installing Custom AUR Packages..."
-    install_custom_aur_packages_chroot || _log_error "Custom AUR packages installation failed."
-
-    _log_info "Installing AUR Numlock on Boot..."
-    configure_numlock_chroot || _log_error "Numlock on boot configuration failed."
-
+    # --- Phase 8: Finalizations ---
     _log_info "Saving mdadm.conf for RAID arrays..."
     save_mdadm_conf_chroot || _log_error "Mdadm.conf saving failed."
 

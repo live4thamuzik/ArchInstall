@@ -626,7 +626,7 @@ install_packages_chroot() {
 # Installs essential extras inside chroot (beyond base, linux, linux-firmware)
 # Includes editors, docs, networking, fs utils, and storage stacks based on config
 install_essential_extras_chroot() {
-    local packages="sudo man-db man-pages texinfo nano neovim bash-completion git curl networkmanager network-manager-applet iwctl archlinux-keyring base-devel lvm2 pipewire btop openssh parallel"
+    local packages="sudo man-db man-pages texinfo nano neovim bash-completion git curl networkmanager network-manager-applet iwd archlinux-keyring base-devel lvm2 pipewire btop openssh parallel"
 
     # Filesystem utilities
     if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ] || [ "$HOME_FILESYSTEM_TYPE" == "btrfs" ]; then
