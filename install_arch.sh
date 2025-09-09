@@ -252,7 +252,7 @@ handle_installation_interrupt() {
     
     exit 130
 }
-# Helper function for base system installation (simplified approach based on proven second revision)
+# Helper function for base system installation
 install_base_system_target() {
     log_info "Installing base system packages into /mnt..."
 

@@ -2,6 +2,15 @@
 # chroot_config.sh - Functions for post-base-install (chroot) configurations
 # This script is designed to be copied into the /mnt environment and executed by arch-chroot.
 
+# Preserve variables passed from the installer before sourcing defaults
+PASSED_MAIN_USERNAME="${MAIN_USERNAME:-}"
+PASSED_MAIN_USER_PASSWORD="${MAIN_USER_PASSWORD:-}"
+PASSED_ROOT_PASSWORD="${ROOT_PASSWORD:-}"
+PASSED_SYSTEM_HOSTNAME="${SYSTEM_HOSTNAME:-}"
+PASSED_TIMEZONE="${TIMEZONE:-}"
+PASSED_LOCALE="${LOCALE:-}"
+PASSED_KEYMAP="${KEYMAP:-}"
+
 # Strict mode for this script
 set -euo pipefail
 
@@ -11,11 +20,20 @@ source ./utils.sh
 source ./disk_strategies.sh
 source ./dialogs.sh
 
+# Restore passed values so config defaults do not overwrite them
+[ -n "$PASSED_MAIN_USERNAME" ] && MAIN_USERNAME="$PASSED_MAIN_USERNAME"
+[ -n "$PASSED_MAIN_USER_PASSWORD" ] && MAIN_USER_PASSWORD="$PASSED_MAIN_USER_PASSWORD"
+[ -n "$PASSED_ROOT_PASSWORD" ] && ROOT_PASSWORD="$PASSED_ROOT_PASSWORD"
+[ -n "$PASSED_SYSTEM_HOSTNAME" ] && SYSTEM_HOSTNAME="$PASSED_SYSTEM_HOSTNAME"
+[ -n "$PASSED_TIMEZONE" ] && TIMEZONE="$PASSED_TIMEZONE"
+[ -n "$PASSED_LOCALE" ] && LOCALE="$PASSED_LOCALE"
+[ -n "$PASSED_KEYMAP" ] && KEYMAP="$PASSED_KEYMAP"
+
 # Note: Variables like INSTALL_DISK, ROOT_PASSWORD, etc. are now populated from the environment passed by install_arch.sh
 # Associative arrays like PARTITION_UUIDs are also exported (-A).
 # So, they will be directly available in this script's scope.
 
-# Enhanced logging functions for chroot context (based on revision 2 approach)
+# Enhanced logging functions for chroot context
 _log_message() {
     local level="$1"
     local message="$2"
@@ -56,37 +74,21 @@ _log_success() { echo -e "\n\e[32;1m============================================
 # Main function for chroot configuration - this is now the entry point for this script
 # Performs all post-installation configuration inside the chroot environment
 # Global: All configuration variables exported from install_arch.sh
-main_chroot_config() {
-    _log_info "Starting chroot configurations within target system."
+# Begin chroot configuration (no wrapper function)
+    _log_info "Starting chroot configuration."
     
-    # Debug: Show all environment variables related to passwords and users
-    _log_info "Debug - Environment variables in chroot:"
-    _log_info "  MAIN_USERNAME: '${MAIN_USERNAME:-NOT_SET}'"
-    _log_info "  ROOT_PASSWORD: '${ROOT_PASSWORD:+SET}' (length: ${#ROOT_PASSWORD})"
-    _log_info "  MAIN_USER_PASSWORD: '${MAIN_USER_PASSWORD:+SET}' (length: ${#MAIN_USER_PASSWORD})"
-    _log_info "  SYSTEM_HOSTNAME: '${SYSTEM_HOSTNAME:-NOT_SET}'"
-    _log_info "  TIMEZONE: '${TIMEZONE:-NOT_SET}'"
-    _log_info "  LOCALE: '${LOCALE:-NOT_SET}'"
-    
-    # Verify critical variables are set
+    # Verify essential variables are present (concise)
     if [ -z "$ROOT_PASSWORD" ] || [ -z "$MAIN_USERNAME" ] || [ -z "$MAIN_USER_PASSWORD" ]; then
-        _log_error "Critical variables missing in chroot environment!"
-        _log_error "ROOT_PASSWORD: ${ROOT_PASSWORD:+SET}${ROOT_PASSWORD:-NOT_SET}"
-        _log_error "MAIN_USERNAME: ${MAIN_USERNAME:-NOT_SET}"
-        _log_error "MAIN_USER_PASSWORD: ${MAIN_USER_PASSWORD:+SET}${MAIN_USER_PASSWORD:-NOT_SET}"
-        exit 1
+        _log_error "Missing required credentials (MAIN_USERNAME/MAIN_USER_PASSWORD/ROOT_PASSWORD)."
     fi
 
     # --- Phase 1: Basic System Configuration ---
-    _log_info "Configuring pacman for better user experience..."
     configure_pacman_chroot || _log_error "Pacman configuration failed."
 
     # Microcode before other additions
-    _log_info "Installing CPU microcode..."
     install_microcode_chroot || _log_error "CPU Microcode installation failed."
 
     # Essential extras beyond pacstrap base: editors, docs, fs utils, storage stacks
-    _log_info "Installing essential extra packages..."
     install_essential_extras_chroot || _log_error "Essential extra packages installation failed."
 
     # Set Neovim as default editor
@@ -94,8 +96,10 @@ main_chroot_config() {
     configure_default_editor_chroot || _log_error "Failed to set Neovim as default editor."
 
     # Enable core services early
-    _log_info "Enabling core services..."
     enable_systemd_service_chroot "NetworkManager" || _log_error "Failed to enable NetworkManager service."
+
+    # Ensure the chosen time sync package is present before enabling its service
+    install_time_sync_chroot || _log_warn "Time sync package installation step returned non-zero; continuing."
     case "$TIME_SYNC_CHOICE" in
         "ntpd") enable_systemd_service_chroot "ntpd" || _log_error "Failed to enable ntpd service." ;;
         "chrony") enable_systemd_service_chroot "chronyd" || _log_error "Failed to enable chronyd service." ;;
@@ -103,18 +107,14 @@ main_chroot_config() {
     esac
 
     # Locale > Timezone > Initramfs as requested
-    _log_info "Configuring system localization..."
     configure_localization_chroot || _log_error "Localization configuration failed."
 
-    _log_info "Updating initramfs..."
     configure_mkinitcpio_hooks_chroot || _log_error "Mkinitpio hooks configuration or initramfs rebuild failed."
 
     # User and password, then hostname, then sudoers
-    _log_info "Preparing user credentials and account..."
     USERNAME="$MAIN_USERNAME"
     USER_PASSWORD="$MAIN_USER_PASSWORD"
 
-    _log_info "Creating user account: $USERNAME"
     if create_user "$USERNAME"; then
         _log_success "User account creation completed successfully"
     else
@@ -127,10 +127,8 @@ main_chroot_config() {
         exit 1
     fi
 
-    _log_info "Configuring hostname..."
     configure_hostname_chroot || _log_error "Hostname configuration failed."
 
-    _log_info "Configuring sudoers file..."
     if update_sudoers; then
         _log_success "sudoers configuration completed successfully"
     else
@@ -219,12 +217,6 @@ main_chroot_config() {
     _log_info "Installing AUR Numlock on Boot..."
     configure_numlock_chroot || _log_error "Numlock on boot configuration failed."
 
-    _log_info "Deploying Dotfiles..."
-    deploy_dotfiles_chroot || _log_error "Dotfile deployment failed."
-
-    _log_info "Saving mdadm.conf for RAID arrays..."
-    save_mdadm_conf_chroot || _log_error "Mdadm.conf saving failed."
-
     # --- Phase 5: Final System Services ---
     _log_info "Enabling essential system services..."
     enable_systemd_service_chroot "NetworkManager" || _log_error "Failed to enable NetworkManager service."
@@ -250,6 +242,25 @@ main_chroot_config() {
     _log_info "Configuring desktop environment and display manager..."
     configure_desktop_environment_chroot || _log_error "Desktop environment configuration failed."
 
+    # --- Phase 8: Optional AUR/Custom & Finalizations ---
+    _log_info "Installing AUR Helper..."
+    install_aur_helper_chroot || _log_error "AUR Helper installation failed."
+
+    _log_info "Installing Custom Packages..."
+    install_custom_packages_chroot || _log_error "Custom packages installation failed."
+
+    _log_info "Installing Custom AUR Packages..."
+    install_custom_aur_packages_chroot || _log_error "Custom AUR packages installation failed."
+
+    _log_info "Installing AUR Numlock on Boot..."
+    configure_numlock_chroot || _log_error "Numlock on boot configuration failed."
+
+    _log_info "Saving mdadm.conf for RAID arrays..."
+    save_mdadm_conf_chroot || _log_error "Mdadm.conf saving failed."
+
+    _log_info "Deploying Dotfiles..."
+    deploy_dotfiles_chroot || _log_error "Dotfile deployment failed."
+
     _log_success "Chroot configuration complete."
     
     # Preserve logs in the chroot environment
@@ -261,7 +272,4 @@ main_chroot_config() {
             _log_info "Chroot logs preserved at: /var/log/archinstall-chroot.log"
         fi
     fi
-}
-
-# Call the main function
-main_chroot_config
+# End chroot configuration

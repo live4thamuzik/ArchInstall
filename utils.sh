@@ -9,7 +9,7 @@ readonly C_HEADER='\e[36;1m'
 readonly C_SUCCESS='\e[32;1m'
 readonly C_RESET='\e[0m'
 
-# Enhanced logging system based on revision 2 approach
+# Enhanced logging system
 log_message() {
     local level="$1"
     local message="$2"
@@ -63,7 +63,7 @@ error_exit() {
     exit 1
 }
 
-# Enhanced command execution with automatic error capture (from revision 2)
+# Enhanced command execution with automatic error capture
 run() {
     local cmd="$*"
     log_debug "Executing: $cmd"
@@ -98,7 +98,7 @@ log_success() {
     echo -e "${C_SUCCESS}==================================================${C_RESET}\n"
 }
 
-# Progress indicator function (inspired by revision 2)
+# Progress indicator function
 show_progress() {
     local current="$1"
     local total="$2"
@@ -126,7 +126,7 @@ show_progress() {
 }
 
 # --- Password Management ---
-# Robust password setting function (based on proven second revision approach)
+# Robust password setting function
 set_password_chroot() {
     local username="$1"
     local password="$2"
@@ -205,7 +205,7 @@ check_prerequisites() {
     log_info "Prerequisites met."
 }
 
-# Enhanced validation functions (inspired by revision 2)
+# Enhanced validation functions
 
 validate_disk() {
     local disk="$1"
@@ -217,7 +217,7 @@ validate_disk() {
     fi
 }
 
-# Enhanced confirmation function (inspired by revision 2)
+# Enhanced confirmation function
 confirm_action() {
     local message="$1"
     read -r -p "$message (Y/n) " confirm
@@ -626,7 +626,7 @@ install_packages_chroot() {
 # Installs essential extras inside chroot (beyond base, linux, linux-firmware)
 # Includes editors, docs, networking, fs utils, and storage stacks based on config
 install_essential_extras_chroot() {
-    local packages="sudo man-db man-pages texinfo nano neovim bash-completion git curl networkmanager"
+    local packages="sudo man-db man-pages texinfo nano neovim bash-completion git curl networkmanager network-manager-applet iwctl archlinux-keyring base-devel lvm2 pipewire btop openssh parallel"
 
     # Filesystem utilities
     if [ "$ROOT_FILESYSTEM_TYPE" == "btrfs" ] || [ "$HOME_FILESYSTEM_TYPE" == "btrfs" ]; then
@@ -649,6 +649,22 @@ install_essential_extras_chroot() {
 
     log_info "Installing essential extra packages inside chroot: $packages"
     install_packages_chroot $packages
+}
+
+# Installs time sync package in chroot according to TIME_SYNC_CHOICE
+install_time_sync_chroot() {
+    case "$TIME_SYNC_CHOICE" in
+        ntpd)
+            log_info "Installing NTP (ntp) for time synchronization..."
+            install_packages_chroot ntp ;;
+        chrony)
+            log_info "Installing Chrony for time synchronization..."
+            install_packages_chroot chrony ;;
+        systemd-timesyncd)
+            log_info "Using systemd-timesyncd (already part of systemd), no package install needed." ;;
+        *)
+            log_warn "Unknown TIME_SYNC_CHOICE '$TIME_SYNC_CHOICE'. Skipping time sync package install." ;;
+    esac
 }
 
 # Sets Neovim as the default system editor inside chroot
