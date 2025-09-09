@@ -293,7 +293,7 @@ format_filesystem() {
         ext4)   mkfs.ext4 -F "$dev_path" || error_exit "Failed to format $dev_path as ext4.";;
         xfs)    mkfs.xfs -f "$dev_path" || error_exit "Failed to format $dev_path as xfs.";;
         btrfs)  mkfs.btrfs -f "$dev_path" || error_exit "Failed to format $dev_path as btrfs.";;
-        vfat)   mkfs.vfat -F 32 "$dev_path" || error_exit "Failed to format $dev_path as vfat.";;
+        vfat)   mkfs.fat -F32 "$dev_path" || error_exit "Failed to format $dev_path as vfat.";;
         swap)   mkswap "$dev_path" || error_exit "Failed to create swap on $dev_path.";;
         *)      error_exit "Unsupported filesystem type for formatting: $fs_type.";;
     esac
@@ -337,7 +337,14 @@ safe_mount() {
     local mnt="$2"
     mkdir -p "$mnt" || error_exit "Failed to create mount point $mnt."
     log_info "Mounting $dev to $mnt..."
-    mount "$dev" "$mnt" || error_exit "Failed to mount $dev to $mnt."
+    
+    # For EFI partitions, use specific mount options
+    if [[ "$mnt" == *"/boot/efi"* ]]; then
+        log_info "Mounting EFI partition with specific options..."
+        mount -t vfat -o rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro "$dev" "$mnt" || error_exit "Failed to mount EFI partition $dev to $mnt."
+    else
+        mount "$dev" "$mnt" || error_exit "Failed to mount $dev to $mnt."
+    fi
 }
 
 # Safely unmounts a path. Uses lazy unmount first.

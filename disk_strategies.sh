@@ -38,18 +38,26 @@ do_auto_simple_partitioning() {
 
     # Create partition table (GPT for UEFI, MBR for BIOS)
     if [ "$BOOT_MODE" == "uefi" ]; then
-        parted -s "$INSTALL_DISK" mklabel gpt || error_exit "Failed to create GPT label on $INSTALL_DISK."
+        sgdisk -Z "$INSTALL_DISK" || error_exit "Failed to create GPT label on $INSTALL_DISK."
     else
-        parted -s "$INSTALL_DISK" mklabel msdos || error_exit "Failed to create MBR label on $INSTALL_DISK."
+        # For BIOS, we'll use fdisk to create MBR
+        printf "o\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create MBR label on $INSTALL_DISK."
     fi
     partprobe "$INSTALL_DISK"
 
     # EFI Partition (for UEFI)
     if [ "$BOOT_MODE" == "uefi" ]; then
         log_info "Creating EFI partition (${EFI_PART_SIZE_MIB}MiB)..."
-        parted -s "$INSTALL_DISK" mkpart primary fat32 "${current_start_mib}MiB" "$((current_start_mib + EFI_PART_SIZE_MIB))MiB" set "$part_num" esp on || error_exit "Failed to create EFI partition."
+        # Create EFI partition with sgdisk: -n 1:0:+size -t 1:EF00
+        local efi_size_mb="${EFI_PART_SIZE_MIB}M"
+        sgdisk -n 1:0:+"$efi_size_mb" -t 1:EF00 "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
         partprobe "$INSTALL_DISK"
         part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
+        
+        # Debug: Show partition info before formatting
+        log_info "EFI partition created at: $part_dev"
+        sgdisk -p "$INSTALL_DISK" || log_warn "Failed to print partition table"
+        
         format_filesystem "$part_dev" "vfat"
         capture_id_for_config "efi" "$part_dev" "UUID"
         capture_id_for_config "efi" "$part_dev" "PARTUUID"
@@ -63,7 +71,13 @@ do_auto_simple_partitioning() {
         log_info "Creating Swap partition..."
         # Use an appropriate size for swap
         local swap_size_mib=$((2048)) # Defaulting to 2 GiB for a reasonable swap partition
-        parted -s "$INSTALL_DISK" mkpart primary linux-swap "${current_start_mib}MiB" "$((current_start_mib + swap_size_mib))MiB" || error_exit "Failed to create swap partition."
+        local swap_size_mb="${swap_size_mib}M"
+        if [ "$BOOT_MODE" == "uefi" ]; then
+            sgdisk -n "$part_num:0:+"$swap_size_mb" -t "$part_num":8200 "$INSTALL_DISK" || error_exit "Failed to create swap partition."
+        else
+            # For BIOS, use fdisk for swap partition
+            printf "n\np\n$part_num\n\n+${swap_size_mib}M\nt\n$part_num\n82\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create swap partition."
+        fi
         partprobe "$INSTALL_DISK"
         part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
         format_filesystem "$part_dev" "swap"
@@ -79,7 +93,13 @@ do_auto_simple_partitioning() {
     if [ "$WANT_HOME_PARTITION" == "yes" ]; then
         log_info "Creating Root partition and separate Home partition (rest of disk)..."
         # Root partition (fixed size)
-        parted -s "$INSTALL_DISK" mkpart primary "$ROOT_FILESYSTEM_TYPE" "${current_start_mib}MiB" "$((current_start_mib + root_size_mib))MiB" || error_exit "Failed to create root partition."
+        local root_size_mb="${root_size_mib}M"
+        if [ "$BOOT_MODE" == "uefi" ]; then
+            sgdisk -n "$part_num:0:+"$root_size_mb" -t "$part_num":8300 "$INSTALL_DISK" || error_exit "Failed to create root partition."
+        else
+            # For BIOS, use fdisk for root partition
+            printf "n\np\n$part_num\n\n+${root_size_mib}M\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create root partition."
+        fi
         partprobe "$INSTALL_DISK"
         part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
         format_filesystem "$part_dev" "$ROOT_FILESYSTEM_TYPE"
@@ -95,7 +115,12 @@ do_auto_simple_partitioning() {
 
         # Home partition (takes remaining space)
         log_info "Creating Home partition (rest of disk)..."
-        parted -s "$INSTALL_DISK" mkpart primary "$HOME_FILESYSTEM_TYPE" "${current_start_mib}MiB" "100%" || error_exit "Failed to create home partition."
+        if [ "$BOOT_MODE" == "uefi" ]; then
+            sgdisk -n "$part_num:0:0 -t "$part_num":8300 "$INSTALL_DISK" || error_exit "Failed to create home partition."
+        else
+            # For BIOS, use fdisk for home partition (rest of disk)
+            printf "n\np\n$part_num\n\n\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create home partition."
+        fi
         partprobe "$INSTALL_DISK"
         part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
         format_filesystem "$part_dev" "$HOME_FILESYSTEM_TYPE"
@@ -105,7 +130,12 @@ do_auto_simple_partitioning() {
     else
         # Root takes all remaining space
         log_info "Creating Root partition (rest of disk)..."
-        parted -s "$INSTALL_DISK" mkpart primary "$ROOT_FILESYSTEM_TYPE" "${current_start_mib}MiB" "100%" || error_exit "Failed to create root partition."
+        if [ "$BOOT_MODE" == "uefi" ]; then
+            sgdisk -n "$part_num:0:0 -t "$part_num":8300 "$INSTALL_DISK" || error_exit "Failed to create root partition."
+        else
+            # For BIOS, use fdisk for root partition (rest of disk)
+            printf "n\np\n$part_num\n\n\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create root partition."
+        fi
         partprobe "$INSTALL_DISK"
         part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
         format_filesystem "$part_dev" "$ROOT_FILESYSTEM_TYPE"
@@ -132,18 +162,26 @@ do_auto_luks_lvm_partitioning() {
 
     # 1. Create partition table (GPT for UEFI, MBR for BIOS)
     if [ "$BOOT_MODE" == "uefi" ]; then
-        parted -s "$INSTALL_DISK" mklabel gpt || error_exit "Failed to create GPT label on $INSTALL_DISK."
+        sgdisk -Z "$INSTALL_DISK" || error_exit "Failed to create GPT label on $INSTALL_DISK."
     else
-        parted -s "$INSTALL_DISK" mklabel msdos || error_exit "Failed to create MBR label on $INSTALL_DISK."
+        # For BIOS, we'll use fdisk to create MBR
+        printf "o\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create MBR label on $INSTALL_DISK."
     fi
     partprobe "$INSTALL_DISK"
 
     # 2. EFI Partition (for UEFI) - 1024MiB
     if [ "$BOOT_MODE" == "uefi" ]; then
         log_info "Creating EFI partition (${EFI_PART_SIZE_MIB}MiB)..."
-        parted -s "$INSTALL_DISK" mkpart primary fat32 "${current_start_mib}MiB" "$((current_start_mib + EFI_PART_SIZE_MIB))MiB" set "$part_num" esp on || error_exit "Failed to create EFI partition."
+        # Create EFI partition with sgdisk: -n 1:0:+size -t 1:EF00
+        local efi_size_mb="${EFI_PART_SIZE_MIB}M"
+        sgdisk -n 1:0:+"$efi_size_mb" -t 1:EF00 "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
         partprobe "$INSTALL_DISK"
         part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
+        
+        # Debug: Show partition info before formatting
+        log_info "EFI partition created at: $part_dev"
+        sgdisk -p "$INSTALL_DISK" || log_warn "Failed to print partition table"
+        
         format_filesystem "$part_dev" "vfat"
         capture_id_for_config "efi" "$part_dev" "UUID"
         capture_id_for_config "efi" "$part_dev" "PARTUUID"
@@ -154,7 +192,13 @@ do_auto_luks_lvm_partitioning() {
 
     # 3. Dedicated /boot Partition - 2GiB
     log_info "Creating dedicated /boot partition (${BOOT_PART_SIZE_MIB}MiB)..."
-    parted -s "$INSTALL_DISK" mkpart primary ext4 "${current_start_mib}MiB" "$((current_start_mib + BOOT_PART_SIZE_MIB))MiB" || error_exit "Failed to create /boot partition."
+    local boot_size_mb="${BOOT_PART_SIZE_MIB}M"
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        sgdisk -n "$part_num:0:+"$boot_size_mb" -t "$part_num":8300 "$INSTALL_DISK" || error_exit "Failed to create /boot partition."
+    else
+        # For BIOS, use fdisk for /boot partition
+        printf "n\np\n$part_num\n\n+${BOOT_PART_SIZE_MIB}M\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create /boot partition."
+    fi
     partprobe "$INSTALL_DISK"
     part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
     format_filesystem "$part_dev" "ext4"
@@ -166,10 +210,14 @@ do_auto_luks_lvm_partitioning() {
 
     # 4. Main LUKS Container Partition (takes rest of disk)
     log_info "Creating LUKS container partition (rest of disk)..."
-    parted -s "$INSTALL_DISK" mkpart primary ext4 "${current_start_mib}MiB" "100%" || error_exit "Failed to create LUKS container partition."
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        sgdisk -n "$part_num:0:0 -t "$part_num":8300 "$INSTALL_DISK" || error_exit "Failed to create LUKS container partition."
+    else
+        # For BIOS, use fdisk for LUKS container partition (rest of disk)
+        printf "n\np\n$part_num\n\n\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create LUKS container partition."
+    fi
     partprobe "$INSTALL_DISK"
     part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
-    parted -s "$INSTALL_DISK" set "$part_num" lvm on || log_warn "Failed to set LVM flag on LUKS container partition."
 
     # Perform LUKS encryption on this partition
     local luks_name="lvm"
@@ -198,22 +246,23 @@ do_auto_raid_luks_lvm_partitioning() {
 
         local current_start_mib=1
 
-        parted -s "$disk" mklabel gpt || error_exit "Failed to create GPT label on $disk."
+        sgdisk -Z "$disk" || error_exit "Failed to create GPT label on $disk."
         partprobe "$disk"
 
         # 1. EFI partition on each disk (if UEFI)
         if [ "$BOOT_MODE" == "uefi" ]; then
-            parted -s "$disk" mkpart primary fat32 "${current_start_mib}MiB" "$((current_start_mib + EFI_PART_SIZE_MIB))MiB" set "$efi_part_num" esp on || error_exit "Failed to create EFI partition on $disk."
+            local efi_size_mb="${EFI_PART_SIZE_MIB}M"
+            sgdisk -n 1:0:+"$efi_size_mb" -t 1:EF00 "$disk" || error_exit "Failed to create EFI partition on $disk."
             current_start_mib=$((current_start_mib + EFI_PART_SIZE_MIB))
         fi
 
         # 2. /boot partition on each disk (will be part of RAID1 for /boot)
-        parted -s "$disk" mkpart primary ext4 "${current_start_mib}MiB" "$((current_start_mib + BOOT_PART_SIZE_MIB))MiB" || error_exit "Failed to create /boot partition on $disk."
+        local boot_size_mb="${BOOT_PART_SIZE_MIB}M"
+        sgdisk -n "$boot_part_num:0:+"$boot_size_mb" -t "$boot_part_num":8300 "$disk" || error_exit "Failed to create /boot partition on $disk."
         current_start_mib=$((current_start_mib + BOOT_PART_SIZE_MIB))
         
         # 3. Main LUKS Container Partition (takes rest of disk, will be part of RAID1 for LUKS)
-        parted -s "$disk" mkpart primary ext4 "${current_start_mib}MiB" "100%" || error_exit "Failed to create LUKS container partition on $disk."
-        parted -s "$disk" set "$luks_part_num" raid on || log_warn "Failed to set RAID flag on LUKS partition on $disk."
+        sgdisk -n "$luks_part_num:0:0 -t "$luks_part_num":8300 "$disk" || error_exit "Failed to create LUKS container partition on $disk."
         partprobe "$disk"
     done
 
