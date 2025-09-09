@@ -73,7 +73,7 @@ do_auto_simple_partitioning() {
         local swap_size_mib=$((2048)) # Defaulting to 2 GiB for a reasonable swap partition
         local swap_size_mb="${swap_size_mib}M"
         if [ "$BOOT_MODE" == "uefi" ]; then
-            sgdisk -n "$part_num:0:+"$swap_size_mb" -t "$part_num":8200 "$INSTALL_DISK" || error_exit "Failed to create swap partition."
+            sgdisk -n "$part_num:0:+$swap_size_mb" -t "$part_num:8200" "$INSTALL_DISK" || error_exit "Failed to create swap partition."
         else
             # For BIOS, use fdisk for swap partition
             printf "n\np\n$part_num\n\n+${swap_size_mib}M\nt\n$part_num\n82\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create swap partition."
@@ -95,7 +95,7 @@ do_auto_simple_partitioning() {
         # Root partition (fixed size)
         local root_size_mb="${root_size_mib}M"
         if [ "$BOOT_MODE" == "uefi" ]; then
-            sgdisk -n "$part_num:0:+"$root_size_mb" -t "$part_num":8300 "$INSTALL_DISK" || error_exit "Failed to create root partition."
+            sgdisk -n "$part_num:0:+$root_size_mb" -t "$part_num:8300" "$INSTALL_DISK" || error_exit "Failed to create root partition."
         else
             # For BIOS, use fdisk for root partition
             printf "n\np\n$part_num\n\n+${root_size_mib}M\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create root partition."
@@ -116,7 +116,7 @@ do_auto_simple_partitioning() {
         # Home partition (takes remaining space)
         log_info "Creating Home partition (rest of disk)..."
         if [ "$BOOT_MODE" == "uefi" ]; then
-            sgdisk -n "$part_num:0:0 -t "$part_num":8300 "$INSTALL_DISK" || error_exit "Failed to create home partition."
+            sgdisk -n "$part_num:0:0" -t "$part_num:8300" "$INSTALL_DISK" || error_exit "Failed to create home partition."
         else
             # For BIOS, use fdisk for home partition (rest of disk)
             printf "n\np\n$part_num\n\n\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create home partition."
@@ -131,7 +131,7 @@ do_auto_simple_partitioning() {
         # Root takes all remaining space
         log_info "Creating Root partition (rest of disk)..."
         if [ "$BOOT_MODE" == "uefi" ]; then
-            sgdisk -n "$part_num:0:0 -t "$part_num":8300 "$INSTALL_DISK" || error_exit "Failed to create root partition."
+            sgdisk -n "$part_num:0:0" -t "$part_num:8300" "$INSTALL_DISK" || error_exit "Failed to create root partition."
         else
             # For BIOS, use fdisk for root partition (rest of disk)
             printf "n\np\n$part_num\n\n\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create root partition."
@@ -194,7 +194,7 @@ do_auto_luks_lvm_partitioning() {
     log_info "Creating dedicated /boot partition (${BOOT_PART_SIZE_MIB}MiB)..."
     local boot_size_mb="${BOOT_PART_SIZE_MIB}M"
     if [ "$BOOT_MODE" == "uefi" ]; then
-        sgdisk -n "$part_num:0:+"$boot_size_mb" -t "$part_num":8300 "$INSTALL_DISK" || error_exit "Failed to create /boot partition."
+        sgdisk -n "$part_num:0:+$boot_size_mb" -t "$part_num:8300" "$INSTALL_DISK" || error_exit "Failed to create /boot partition."
     else
         # For BIOS, use fdisk for /boot partition
         printf "n\np\n$part_num\n\n+${BOOT_PART_SIZE_MIB}M\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create /boot partition."
@@ -211,7 +211,7 @@ do_auto_luks_lvm_partitioning() {
     # 4. Main LUKS Container Partition (takes rest of disk)
     log_info "Creating LUKS container partition (rest of disk)..."
     if [ "$BOOT_MODE" == "uefi" ]; then
-        sgdisk -n "$part_num:0:0 -t "$part_num":8300 "$INSTALL_DISK" || error_exit "Failed to create LUKS container partition."
+        sgdisk -n "$part_num:0:0" -t "$part_num:8300" "$INSTALL_DISK" || error_exit "Failed to create LUKS container partition."
     else
         # For BIOS, use fdisk for LUKS container partition (rest of disk)
         printf "n\np\n$part_num\n\n\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create LUKS container partition."
@@ -258,11 +258,11 @@ do_auto_raid_luks_lvm_partitioning() {
 
         # 2. /boot partition on each disk (will be part of RAID1 for /boot)
         local boot_size_mb="${BOOT_PART_SIZE_MIB}M"
-        sgdisk -n "$boot_part_num:0:+"$boot_size_mb" -t "$boot_part_num":8300 "$disk" || error_exit "Failed to create /boot partition on $disk."
+        sgdisk -n "$boot_part_num:0:+$boot_size_mb" -t "$boot_part_num:8300" "$disk" || error_exit "Failed to create /boot partition on $disk."
         current_start_mib=$((current_start_mib + BOOT_PART_SIZE_MIB))
         
         # 3. Main LUKS Container Partition (takes rest of disk, will be part of RAID1 for LUKS)
-        sgdisk -n "$luks_part_num:0:0 -t "$luks_part_num":8300 "$disk" || error_exit "Failed to create LUKS container partition on $disk."
+        sgdisk -n "$luks_part_num:0:0" -t "$luks_part_num:8300" "$disk" || error_exit "Failed to create LUKS container partition on $disk."
         partprobe "$disk"
     done
 
