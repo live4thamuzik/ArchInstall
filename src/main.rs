@@ -29,6 +29,9 @@ pub struct InstallerState {
     pub installer_output: Vec<String>,
     pub is_running: bool,
     pub is_complete: bool,
+    pub is_collecting_input: bool,
+    pub current_input_field: String,
+    pub input_buffer: String,
 }
 
 impl Default for InstallerState {
@@ -45,6 +48,9 @@ impl Default for InstallerState {
             installer_output: Vec::new(),
             is_running: false,
             is_complete: false,
+            is_collecting_input: false,
+            current_input_field: "".to_string(),
+            input_buffer: "".to_string(),
         }
     }
 }
@@ -96,7 +102,9 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
         if crossterm::event::poll(Duration::from_millis(16))? { // ~60 FPS
             match crossterm::event::read()? {
                 Event::Key(KeyEvent { code, modifiers, .. }) => {
-                    let current_state = app_state.lock().unwrap().clone();
+                    let mut state = app_state.lock().unwrap();
+                    let current_state = state.clone();
+                    
                     match code {
                         KeyCode::Char('q') | KeyCode::Esc => {
                             break;
@@ -108,6 +116,20 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                         KeyCode::Char('c') if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
                             // Handle Ctrl+C
                             break;
+                        }
+                        KeyCode::Enter if current_state.is_collecting_input => {
+                            // Handle input submission
+                            handle_input_submission(&mut state);
+                        }
+                        KeyCode::Backspace if current_state.is_collecting_input => {
+                            // Handle backspace
+                            if !state.input_buffer.is_empty() {
+                                state.input_buffer.pop();
+                            }
+                        }
+                        KeyCode::Char(c) if current_state.is_collecting_input => {
+                            // Handle character input
+                            state.input_buffer.push(c);
                         }
                         _ => {}
                     }
@@ -136,50 +158,90 @@ fn restore_terminal() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn start_installer(app_state: Arc<Mutex<InstallerState>>) {
-    // Update initial state
+    // Start input collection instead of running installer directly
     {
         let mut state = app_state.lock().unwrap();
         state.is_running = true;
-        state.current_phase = "Starting Installation".to_string();
-        state.status_message = "Launching installer...".to_string();
-        state.progress = 5;
+        state.is_collecting_input = true;
+        state.current_phase = "Gathering Installation Details".to_string();
+        state.status_message = "Collecting user preferences...".to_string();
+        state.progress = 10;
+        state.current_input_field = "hostname".to_string();
+        state.input_buffer = "".to_string();
     }
+}
 
-    // Start installer in a separate thread
-    thread::spawn(move || {
-        let mut child = Command::new("bash")
-            .arg("./install_arch.sh")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .stdin(Stdio::piped()) // Enable stdin for interactive input
-            .spawn()
-            .expect("Failed to start installer");
+fn handle_input_submission(state: &mut InstallerState) {
+    let input = state.input_buffer.clone();
+    state.input_buffer.clear();
+    
+    match state.current_input_field.as_str() {
+        "hostname" => {
+            state.username = input.clone(); // For now, use hostname as username
+            state.current_input_field = "disk".to_string();
+            state.status_message = "Select disk (type disk name):".to_string();
+        }
+        "disk" => {
+            state.disk = input;
+            state.current_input_field = "strategy".to_string();
+            state.status_message = "Select strategy (auto/manual):".to_string();
+        }
+        "strategy" => {
+            state.strategy = input;
+            state.current_input_field = "desktop".to_string();
+            state.status_message = "Select desktop (gnome/kde/hyprland/server):".to_string();
+        }
+        "desktop" => {
+            state.desktop = input;
+            // All input collected, start the actual installer
+            state.is_collecting_input = false;
+            state.current_phase = "Starting Installation".to_string();
+            state.status_message = "Launching installer...".to_string();
+            state.progress = 20;
+            
+            // Start the actual installer in a separate thread
+            let app_state = Arc::new(Mutex::new(state.clone()));
+            thread::spawn(move || {
+                run_actual_installer(app_state);
+            });
+        }
+        _ => {}
+    }
+}
 
-        // Read stdout and parse for progress updates
-        if let Some(stdout) = child.stdout.take() {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    // Parse the line for progress information
-                    parse_installer_output(&app_state, &line);
-                }
+fn run_actual_installer(app_state: Arc<Mutex<InstallerState>>) {
+    // Run the actual installer with collected parameters
+    let mut child = Command::new("bash")
+        .arg("./install_arch.sh")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to start installer");
+
+    // Read stdout and parse for progress updates
+    if let Some(stdout) = child.stdout.take() {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            if let Ok(line) = line {
+                // Parse the line for progress information
+                parse_installer_output(&app_state, &line);
             }
         }
+    }
 
-        // Wait for the process to complete
-        let status = child.wait().expect("Failed to wait for installer");
-        
-        // Mark as complete
-        {
-            let mut state = app_state.lock().unwrap();
-            state.is_complete = true;
-            state.progress = 100;
-            state.status_message = "Installation complete!".to_string();
-            state.current_phase = "Complete".to_string();
-        }
-        
-        println!("Installer completed with status: {:?}", status);
-    });
+    // Wait for the process to complete
+    let status = child.wait().expect("Failed to wait for installer");
+    
+    // Mark as complete
+    {
+        let mut state = app_state.lock().unwrap();
+        state.is_complete = true;
+        state.progress = 100;
+        state.status_message = "Installation complete!".to_string();
+        state.current_phase = "Complete".to_string();
+    }
+    
+    println!("Installer completed with status: {:?}", status);
 }
 
 fn parse_installer_output(app_state: &Arc<Mutex<InstallerState>>, line: &str) {
@@ -329,7 +391,9 @@ fn render_progress(f: &mut Frame, area: Rect, app_state: &InstallerState) {
 }
 
 fn render_status(f: &mut Frame, area: Rect, app_state: &InstallerState) {
-    let status_text = if app_state.status_message.len() > 50 {
+    let status_text = if app_state.is_collecting_input {
+        format!("{}: {}", app_state.status_message, app_state.input_buffer)
+    } else if app_state.status_message.len() > 50 {
         format!("{}...", &app_state.status_message[..47])
     } else {
         app_state.status_message.clone()
@@ -370,7 +434,9 @@ fn render_output(f: &mut Frame, area: Rect, app_state: &InstallerState) {
 }
 
 fn render_instructions(f: &mut Frame, area: Rect, app_state: &InstallerState) {
-    let instructions = if app_state.is_running {
+    let instructions = if app_state.is_collecting_input {
+        "Type your input and press Enter. Press 'q' to quit"
+    } else if app_state.is_running {
         "Installation in progress... Press 'q' to quit"
     } else if app_state.is_complete {
         "Installation complete! Press 'q' to quit"
