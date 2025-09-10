@@ -8,9 +8,13 @@ use ratatui::{
 };
 use std::io::{stdout, BufRead, BufReader};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::thread;
 use std::time::Duration;
+use crossterm::event::{Event, KeyCode, KeyEvent};
+
+// Global interrupt flag
+static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone)]
 pub struct InstallerState {
@@ -46,6 +50,30 @@ impl Default for InstallerState {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Setup signal handling for graceful shutdown
+    setup_signal_handlers();
+    
+    // Setup terminal with proper error handling
+    let result = run_app();
+    
+    // Always restore terminal, even if there was an error
+    let _ = restore_terminal();
+    
+    result
+}
+
+fn setup_signal_handlers() {
+    // Set up signal handlers for graceful shutdown
+    let interrupted = &INTERRUPTED;
+    
+    // Handle SIGINT (Ctrl+C)
+    ctrlc::set_handler(move || {
+        interrupted.store(true, Ordering::SeqCst);
+        eprintln!("\nReceived interrupt signal. Shutting down gracefully...");
+    }).expect("Error setting Ctrl+C handler");
+}
+
+fn run_app() -> Result<(), Box<dyn std::error::Error>> {
     // Setup terminal
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = stdout();
@@ -57,34 +85,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create shared app state
     let app_state = Arc::new(Mutex::new(InstallerState::default()));
 
-    // Main event loop
+    // Main event loop with proper error handling
     loop {
-        // Get current state
-        let current_state = app_state.lock().unwrap().clone();
+        // Check for interrupt signal
+        if INTERRUPTED.load(Ordering::SeqCst) {
+            break;
+        }
         
-        // Clear the terminal and redraw the TUI
-        terminal.clear()?;
-        terminal.draw(|f| ui(f, &current_state))?;
-
-        // Handle input
-        if crossterm::event::poll(Duration::from_millis(100))? {
-            if let crossterm::event::Event::Key(key_event) = crossterm::event::read()? {
-                match key_event.code {
-                    crossterm::event::KeyCode::Char('q') => break,
-                    crossterm::event::KeyCode::Char('s') if !current_state.is_running => {
-                        // Start the installer
-                        start_installer(Arc::clone(&app_state));
+        // Handle input with timeout to prevent blocking
+        if crossterm::event::poll(Duration::from_millis(16))? { // ~60 FPS
+            match crossterm::event::read()? {
+                Event::Key(KeyEvent { code, modifiers, .. }) => {
+                    let current_state = app_state.lock().unwrap().clone();
+                    match code {
+                        KeyCode::Char('q') | KeyCode::Esc => {
+                            break;
+                        }
+                        KeyCode::Char('s') if !current_state.is_running => {
+                            // Start the installer
+                            start_installer(Arc::clone(&app_state));
+                        }
+                        KeyCode::Char('c') if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                            // Handle Ctrl+C
+                            break;
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
+                Event::Resize(_, _) => {
+                    // Handle terminal resize
+                    terminal.draw(|f| ui(f, &app_state.lock().unwrap().clone()))?;
+                }
+                _ => {}
             }
         }
+
+        // Redraw the UI
+        let current_state = app_state.lock().unwrap().clone();
+        terminal.draw(|f| ui(f, &current_state))?;
     }
 
-    // Restore terminal
-    crossterm::terminal::disable_raw_mode()?;
-    crossterm::execute!(terminal.backend_mut(), crossterm::terminal::LeaveAlternateScreen)?;
+    Ok(())
+}
 
+fn restore_terminal() -> Result<(), Box<dyn std::error::Error>> {
+    // Restore terminal state
+    crossterm::terminal::disable_raw_mode()?;
+    crossterm::execute!(stdout(), crossterm::terminal::LeaveAlternateScreen)?;
     Ok(())
 }
 
@@ -104,6 +151,7 @@ fn start_installer(app_state: Arc<Mutex<InstallerState>>) {
             .arg("./install_arch.sh")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .stdin(Stdio::piped()) // Enable stdin for interactive input
             .spawn()
             .expect("Failed to start installer");
 
@@ -146,7 +194,11 @@ fn parse_installer_output(app_state: &Arc<Mutex<InstallerState>>, line: &str) {
     }
     
     // Parse specific patterns from installer output
-    if line.contains("=== PHASE 1: Disk Partitioning ===") {
+    if line.contains("=== PHASE 0: Gathering Installation Details ===") {
+        state.current_phase = "Gathering Installation Details".to_string();
+        state.progress = 10;
+        state.status_message = "Collecting user preferences...".to_string();
+    } else if line.contains("=== PHASE 1: Disk Partitioning ===") {
         state.current_phase = "Disk Partitioning".to_string();
         state.progress = 20;
         state.status_message = "Partitioning disk...".to_string();
@@ -154,23 +206,35 @@ fn parse_installer_output(app_state: &Arc<Mutex<InstallerState>>, line: &str) {
         state.current_phase = "Base Installation".to_string();
         state.progress = 40;
         state.status_message = "Installing base system...".to_string();
-    } else if line.contains("=== PHASE 3: Bootloader Installation ===") {
-        state.current_phase = "Bootloader Installation".to_string();
-        state.progress = 80;
-        state.status_message = "Installing bootloader...".to_string();
     } else if line.contains("=== PHASE 4: System Configuration ===") {
         state.current_phase = "System Configuration".to_string();
         state.progress = 60;
         state.status_message = "Configuring system...".to_string();
-    } else if line.contains("Collecting installation preferences") {
-        state.current_phase = "Collecting Preferences".to_string();
-        state.progress = 10;
-        state.status_message = "Collecting user preferences...".to_string();
+    } else if line.contains("=== PHASE 5: Finalization ===") {
+        state.current_phase = "Finalization".to_string();
+        state.progress = 80;
+        state.status_message = "Finalizing installation...".to_string();
     } else if line.contains("Installation completed successfully") {
         state.current_phase = "Complete".to_string();
         state.progress = 100;
         state.status_message = "Installation complete!".to_string();
         state.is_complete = true;
+    } else if line.contains("Collecting installation preferences") {
+        state.current_phase = "Collecting Preferences".to_string();
+        state.progress = 10;
+        state.status_message = "Collecting user preferences...".to_string();
+    } else if line.contains("Checking prerequisites") {
+        state.status_message = "Checking prerequisites...".to_string();
+    } else if line.contains("Prerequisites met") {
+        state.status_message = "Prerequisites verified".to_string();
+    } else if line.contains("Configuring mirrors") {
+        state.status_message = "Configuring package mirrors...".to_string();
+    } else if line.contains("Pacstrap essentials") {
+        state.status_message = "Installing base packages...".to_string();
+    } else if line.contains("Generating fstab") {
+        state.status_message = "Generating filesystem table...".to_string();
+    } else if line.contains("Running chroot config") {
+        state.status_message = "Configuring system in chroot...".to_string();
     }
     
     // Parse configuration updates
@@ -197,7 +261,7 @@ fn ui(f: &mut Frame, app_state: &InstallerState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
+            Constraint::Length(6),  // Header (increased for ASCII art)
             Constraint::Length(3),  // Progress bar
             Constraint::Length(3),  // Status message
             Constraint::Length(8),  // Configuration panel
