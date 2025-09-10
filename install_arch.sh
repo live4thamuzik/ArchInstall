@@ -10,15 +10,14 @@ source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/dialogs.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/disk_strategies.sh"
-source "$(dirname "${BASH_SOURCE[0]}")/progress_comm.sh"
+# Progress communication removed - now handled by TUI directly
 
 # --- Main Installation Function ---
 main() {
     # Initialize enhanced logging system
     setup_logging
     
-    # Initialize progress communication system
-    init_progress
+    # Progress communication now handled by TUI directly
     
     log_header "Arch Linux Automated Installer"
     
@@ -29,9 +28,7 @@ main() {
 
 
     # Stage 1: Gather User Input (Always interactive now, no config loading)
-    update_phase "Gathering Installation Details"
-    update_progress 5
-    update_status "Collecting preferences..."
+    echo "=== PHASE 0: Gathering Installation Details ==="
     log_header "Stage 1: Gathering Installation Details"
     gather_installation_details || error_exit "Installation details gathering failed."
     display_summary_and_confirm || error_exit "Installation cancelled by user."
@@ -48,33 +45,24 @@ main() {
     set_console_keymap_live
 
     # Stage 2: Disk Partitioning and Formatting
-    update_phase "Disk Partitioning"
-    update_progress 15
-    update_status "Partitioning disks..."
+    echo "=== PHASE 1: Disk Partitioning ==="
     log_header "Stage 2: Disk Partitioning and Formatting"
     execute_disk_strategy || error_exit "Disk partitioning and formatting failed."
-    update_progress 30
-    update_status "Disk partitioning complete"
+    echo "Disk partitioning complete"
 
     # Stage 3: Base System Installation
-    update_phase "Package Installation"
-    update_progress 40
-    update_status "Installing packages..."
+    echo "=== PHASE 2: Base Installation ==="
     log_header "Stage 3: Installing Base System"
     install_base_system_target || error_exit "Base system installation failed."
     
     # Generate fstab
-    update_progress 50
-    update_status "Generating fstab..."
+    echo "Generating fstab..."
     log_info "Generating fstab file..."
     generate_fstab || error_exit "Fstab generation failed."
-    update_progress 60
-    update_status "Packages installed"
+    echo "Packages installed"
 
     # Stage 4: Chroot Configuration
-    update_phase "System Configuration"
-    update_progress 70
-    update_status "Configuring system..."
+    echo "=== PHASE 4: System Configuration ==="
     log_header "Stage 4: Post-Installation (Chroot) Configuration"
 
     log_info "Copying chroot configuration files to /mnt..."
@@ -210,30 +198,25 @@ main() {
     log_info "  MAIN_USER_PASSWORD: '${MAIN_USER_PASSWORD:+SET}' (length: ${#MAIN_USER_PASSWORD})"
     log_info "  SYSTEM_HOSTNAME: '${SYSTEM_HOSTNAME:-NOT_SET}'"
 
-    update_progress 80
-    update_status "Running chroot config..."
+    echo "Running chroot config..."
     log_info "Executing chroot configuration script inside chroot..."
     arch-chroot /mnt /bin/bash -c "LOG_FILE=$LOG_FILE MAIN_USERNAME='$MAIN_USERNAME' ROOT_PASSWORD='$ROOT_PASSWORD' MAIN_USER_PASSWORD='$MAIN_USER_PASSWORD' SYSTEM_HOSTNAME='$SYSTEM_HOSTNAME' USERNAME='$MAIN_USERNAME' USER_PASSWORD='$MAIN_USER_PASSWORD' HOSTNAME='$SYSTEM_HOSTNAME' ENCRYPTION_PASSWORD='$LUKS_PASSPHRASE' TIMEZONE='$TIMEZONE' LOCALE='$LOCALE' KEYMAP='$KEYMAP' DESKTOP_ENVIRONMENT='$DESKTOP_ENVIRONMENT' DISPLAY_MANAGER='$DISPLAY_MANAGER' BOOTLOADER_TYPE='$BOOTLOADER_TYPE' BOOT_MODE='$BOOT_MODE' OVERRIDE_BOOT_MODE='$OVERRIDE_BOOT_MODE' WANT_SECURE_BOOT='$WANT_SECURE_BOOT' WANT_AUR_HELPER='$WANT_AUR_HELPER' AUR_HELPER_CHOICE='$AUR_HELPER_CHOICE' WANT_GRUB_THEME='$WANT_GRUB_THEME' GRUB_THEME_CHOICE='$GRUB_THEME_CHOICE' WANT_PLYMOUTH='$WANT_PLYMOUTH' WANT_PLYMOUTH_THEME='$WANT_PLYMOUTH_THEME' PLYMOUTH_THEME_CHOICE='$PLYMOUTH_THEME_CHOICE' WANT_BTRFS='$WANT_BTRFS' WANT_BTRFS_SNAPSHOTS='$WANT_BTRFS_SNAPSHOTS' BTRFS_SNAPSHOT_FREQUENCY='$BTRFS_SNAPSHOT_FREQUENCY' BTRFS_KEEP_SNAPSHOTS='$BTRFS_KEEP_SNAPSHOTS' WANT_ENCRYPTION='$WANT_ENCRYPTION' WANT_LVM='$WANT_LVM' WANT_RAID='$WANT_RAID' RAID_LEVEL='$RAID_LEVEL' ROOT_FILESYSTEM_TYPE='$ROOT_FILESYSTEM_TYPE' HOME_FILESYSTEM_TYPE='$HOME_FILESYSTEM_TYPE' KERNEL_TYPE='$KERNEL_TYPE' CPU_MICROCODE_TYPE='$CPU_MICROCODE_TYPE' TIME_SYNC_CHOICE='$TIME_SYNC_CHOICE' GPU_DRIVER_TYPE='$GPU_DRIVER_TYPE' WANT_MULTILIB='$WANT_MULTILIB' WANT_FLATPAK='$WANT_FLATPAK' INSTALL_CUSTOM_PACKAGES='$INSTALL_CUSTOM_PACKAGES' CUSTOM_PACKAGES='$CUSTOM_PACKAGES' INSTALL_CUSTOM_AUR_PACKAGES='$INSTALL_CUSTOM_AUR_PACKAGES' CUSTOM_AUR_PACKAGES='$CUSTOM_AUR_PACKAGES' WANT_NUMLOCK_ON_BOOT='$WANT_NUMLOCK_ON_BOOT' WANT_DOTFILES_DEPLOYMENT='$WANT_DOTFILES_DEPLOYMENT' DOTFILES_REPO_URL='$DOTFILES_REPO_URL' DOTFILES_BRANCH='$DOTFILES_BRANCH' REFLECTOR_COUNTRY_CODE='$REFLECTOR_COUNTRY_CODE' ENABLE_OS_PROBER='$ENABLE_OS_PROBER' WANT_BTRFS_ASSISTANT='$WANT_BTRFS_ASSISTANT' WANT_SWAP='$WANT_SWAP' WANT_HOME_PARTITION='$WANT_HOME_PARTITION' LUKS_PASSPHRASE='$LUKS_PASSPHRASE' INSTALL_DISK='$INSTALL_DISK' ./chroot_config.sh" || error_exit "Chroot configuration failed."
     log_info "Chroot setup complete."
-    update_progress 90
-    update_status "System configuration complete"
+    echo "System configuration complete"
     
     # Stage 5: Finalization
-    update_phase "Finalization"
-    update_progress 95
-    update_status "Finalizing..."
+    echo "=== PHASE 5: Finalization ==="
     log_header "Stage 5: Finalizing Installation"
     final_cleanup || error_exit "Final cleanup failed."
 
-    update_progress 100
-    update_status "Installation complete!"
+    echo "Installation completed successfully!"
     log_success "Arch Linux installation complete! You can now reboot."
     
     # Preserve logs for successful installation
     preserve_logs "success"
     
     # Cleanup progress files
-    cleanup_progress
+    # Progress cleanup no longer needed
     
     prompt_reboot_system
 }
@@ -255,8 +238,8 @@ handle_installation_error() {
     log_error "Installation failed with exit code: $exit_code"
     
     # Update progress to show failure
-    update_status "Installation failed!"
-    cleanup_progress
+    echo "Installation failed!"
+    # Progress cleanup no longer needed
     
     # Preserve logs for failed installation
     preserve_logs "failure"
@@ -278,8 +261,8 @@ handle_installation_interrupt() {
     log_warn "Installation interrupted by user"
     
     # Update progress to show interruption
-    update_status "Installation interrupted!"
-    cleanup_progress
+    echo "Installation interrupted!"
+    # Progress cleanup no longer needed
     
     # Preserve logs for interrupted installation
     preserve_logs "interrupted"

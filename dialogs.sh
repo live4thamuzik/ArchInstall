@@ -367,7 +367,7 @@ gather_installation_details() {
     
     # Update TUI with disk selection
     local disk_size=$(lsblk -d -n -o SIZE "$INSTALL_DISK" 2>/dev/null || echo "Unknown")
-    update_config "$INSTALL_DISK ($disk_size)" "Not selected" "$BOOT_MODE" "Not selected" "Not selected"
+    echo "Selected disk: $INSTALL_DISK ($disk_size)"
 
     # Select partitioning scheme.
     local scheme_options=("auto_simple" "auto_luks_lvm")
@@ -397,7 +397,7 @@ gather_installation_details() {
         *) strategy_name="$PARTITION_SCHEME" ;;
     esac
     local disk_size=$(lsblk -d -n -o SIZE "$INSTALL_DISK" 2>/dev/null || echo "Unknown")
-    update_config "$INSTALL_DISK ($disk_size)" "$strategy_name" "$BOOT_MODE" "Not selected" "Not selected"
+    echo "Selected strategy: $strategy_name"
 
     # Conditional prompts based on selected scheme.
     case "$PARTITION_SCHEME" in
@@ -648,7 +648,8 @@ gather_installation_details() {
         none) desktop_name="None" ;;
         *) desktop_name="$DESKTOP_ENVIRONMENT" ;;
     esac
-    update_config "$INSTALL_DISK ($disk_size)" "$strategy_name" "$BOOT_MODE" "$desktop_name" "$MAIN_USERNAME"
+    echo "Selected desktop: $desktop_name"
+    echo "Username: $MAIN_USERNAME"
 
     # Debug: Show what we just set
     log_info "Debug - Variables set in dialogs:"
@@ -683,7 +684,7 @@ gather_installation_details() {
         manual) strategy_name="Manual" ;;
         *) strategy_name="$PARTITION_SCHEME" ;;
     esac
-    update_config "$INSTALL_DISK ($disk_size)" "$strategy_name" "$BOOT_MODE" "$desktop_name" "Not selected"
+    echo "Selected desktop: $desktop_name"
     if [ "$DESKTOP_ENVIRONMENT" != "none" ]; then
         case "$DESKTOP_ENVIRONMENT" in
             gnome) DISPLAY_MANAGER="gdm";;
