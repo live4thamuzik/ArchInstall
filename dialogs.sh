@@ -364,6 +364,10 @@ gather_installation_details() {
         error_exit "No suitable disks found for installation. Exiting."
     fi
     select_option "Select the primary installation disk:" available_disks INSTALL_DISK
+    
+    # Update TUI with disk selection
+    local disk_size=$(lsblk -d -n -o SIZE "$INSTALL_DISK" 2>/dev/null || echo "Unknown")
+    update_config "$INSTALL_DISK ($disk_size)" "Not selected" "$BOOT_MODE" "Not selected" "Not selected"
 
     # Select partitioning scheme.
     local scheme_options=("auto_simple" "auto_luks_lvm")
@@ -382,6 +386,18 @@ gather_installation_details() {
     scheme_options+=("manual")
 
     select_option "Select partitioning scheme:" scheme_options PARTITION_SCHEME
+
+    # Update TUI with partitioning scheme
+    local strategy_name=""
+    case "$PARTITION_SCHEME" in
+        auto_simple) strategy_name="Simple" ;;
+        auto_luks_lvm) strategy_name="LUKS+LVM" ;;
+        auto_raid_luks_lvm) strategy_name="RAID+LUKS+LVM" ;;
+        manual) strategy_name="Manual" ;;
+        *) strategy_name="$PARTITION_SCHEME" ;;
+    esac
+    local disk_size=$(lsblk -d -n -o SIZE "$INSTALL_DISK" 2>/dev/null || echo "Unknown")
+    update_config "$INSTALL_DISK ($disk_size)" "$strategy_name" "$BOOT_MODE" "Not selected" "Not selected"
 
     # Conditional prompts based on selected scheme.
     case "$PARTITION_SCHEME" in
@@ -613,6 +629,26 @@ gather_installation_details() {
     export MAIN_USER_PASSWORD
     export ROOT_PASSWORD
     export SYSTEM_HOSTNAME
+    
+    # Update TUI with username
+    local disk_size=$(lsblk -d -n -o SIZE "$INSTALL_DISK" 2>/dev/null || echo "Unknown")
+    local strategy_name=""
+    case "$PARTITION_SCHEME" in
+        auto_simple) strategy_name="Simple" ;;
+        auto_luks_lvm) strategy_name="LUKS+LVM" ;;
+        auto_raid_luks_lvm) strategy_name="RAID+LUKS+LVM" ;;
+        manual) strategy_name="Manual" ;;
+        *) strategy_name="$PARTITION_SCHEME" ;;
+    esac
+    local desktop_name=""
+    case "$DESKTOP_ENVIRONMENT" in
+        gnome) desktop_name="GNOME" ;;
+        kde) desktop_name="KDE Plasma" ;;
+        hyprland) desktop_name="Hyprland" ;;
+        none) desktop_name="None" ;;
+        *) desktop_name="$DESKTOP_ENVIRONMENT" ;;
+    esac
+    update_config "$INSTALL_DISK ($disk_size)" "$strategy_name" "$BOOT_MODE" "$desktop_name" "$MAIN_USERNAME"
 
     # Debug: Show what we just set
     log_info "Debug - Variables set in dialogs:"
@@ -628,6 +664,26 @@ gather_installation_details() {
     if [ "$?" -ne 0 ]; then # Check for select_option failure
         error_exit "Desktop Environment selection failed."
     fi
+    
+    # Update TUI with desktop environment selection
+    local desktop_name=""
+    case "$DESKTOP_ENVIRONMENT" in
+        gnome) desktop_name="GNOME" ;;
+        kde) desktop_name="KDE Plasma" ;;
+        hyprland) desktop_name="Hyprland" ;;
+        none) desktop_name="None" ;;
+        *) desktop_name="$DESKTOP_ENVIRONMENT" ;;
+    esac
+    local disk_size=$(lsblk -d -n -o SIZE "$INSTALL_DISK" 2>/dev/null || echo "Unknown")
+    local strategy_name=""
+    case "$PARTITION_SCHEME" in
+        auto_simple) strategy_name="Simple" ;;
+        auto_luks_lvm) strategy_name="LUKS+LVM" ;;
+        auto_raid_luks_lvm) strategy_name="RAID+LUKS+LVM" ;;
+        manual) strategy_name="Manual" ;;
+        *) strategy_name="$PARTITION_SCHEME" ;;
+    esac
+    update_config "$INSTALL_DISK ($disk_size)" "$strategy_name" "$BOOT_MODE" "$desktop_name" "Not selected"
     if [ "$DESKTOP_ENVIRONMENT" != "none" ]; then
         case "$DESKTOP_ENVIRONMENT" in
             gnome) DISPLAY_MANAGER="gdm";;

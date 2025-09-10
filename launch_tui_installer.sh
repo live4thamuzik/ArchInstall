@@ -41,7 +41,10 @@ fi
 
 # Check for pre-compiled TUI binary first
 TUI_BINARY="$SCRIPT_DIR/archinstall-tui"
-if [ ! -f "$TUI_BINARY" ]; then
+if [ -f "$TUI_BINARY" ]; then
+    # Ensure binary is executable
+    chmod +x "$TUI_BINARY"
+elif [ ! -f "$TUI_BINARY" ]; then
     # Fallback: check if Rust is available and build
     if command -v cargo &> /dev/null; then
         echo -e "${YELLOW}Pre-compiled TUI not found. Building from source...${NC}"

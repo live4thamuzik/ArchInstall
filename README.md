@@ -96,6 +96,8 @@ ArchInstall is designed for users who want the power and flexibility of Arch Lin
    # Option 3: Run original installer directly
    ./install_arch.sh
    ```
+   
+   **Note:** The launcher automatically makes the TUI binary executable if needed.
 
 3. **Follow the interactive prompts:**
    - Configure disk layout and encryption
