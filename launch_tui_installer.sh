@@ -3,6 +3,12 @@
 
 set -euo pipefail
 
+# Parse command line arguments
+SKIP_TUI=false
+if [ "${1:-}" = "--no-tui" ] || [ "${1:-}" = "--bash-only" ]; then
+    SKIP_TUI=true
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -14,30 +20,46 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Check if we're in the right directory
-if [ ! -f "$SCRIPT_DIR/install_arch.sh" ] || [ ! -f "$SCRIPT_DIR/Cargo.toml" ]; then
+if [ ! -f "$SCRIPT_DIR/install_arch.sh" ]; then
     echo -e "${RED}Error: This script must be run from the archinstall directory${NC}"
-    echo "Expected files: install_arch.sh, Cargo.toml"
+    echo "Expected file: install_arch.sh"
     exit 1
 fi
 
-# Check if Rust is installed
-if ! command -v cargo &> /dev/null; then
-    echo -e "${RED}Error: Rust/Cargo is not installed${NC}"
-    echo "Please install Rust: https://rustup.rs/"
+# If skipping TUI, just run the Bash installer
+if [ "$SKIP_TUI" = true ]; then
+    echo -e "${BLUE}Running Arch Linux installer in Bash-only mode...${NC}"
+    exec "$SCRIPT_DIR/install_arch.sh"
+fi
+
+# Check for Cargo.toml only if we're using TUI
+if [ ! -f "$SCRIPT_DIR/Cargo.toml" ]; then
+    echo -e "${RED}Error: Cargo.toml not found. TUI mode requires Rust project files.${NC}"
+    echo "Use --no-tui or --bash-only to run without TUI"
     exit 1
 fi
 
-# Check if TUI binary exists, build if not
-TUI_BINARY="$SCRIPT_DIR/target/release/archinstall-tui"
+# Check for pre-compiled TUI binary first
+TUI_BINARY="$SCRIPT_DIR/archinstall-tui"
 if [ ! -f "$TUI_BINARY" ]; then
-    echo -e "${YELLOW}Building TUI...${NC}"
-    cd "$SCRIPT_DIR"
-    cargo build --release
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}Error: Failed to build TUI${NC}"
-        exit 1
+    # Fallback: check if Rust is available and build
+    if command -v cargo &> /dev/null; then
+        echo -e "${YELLOW}Pre-compiled TUI not found. Building from source...${NC}"
+        cd "$SCRIPT_DIR"
+        cargo build --release
+        if [ $? -eq 0 ]; then
+            cp target/release/archinstall-tui .
+            echo -e "${GREEN}TUI built successfully${NC}"
+        else
+            echo -e "${RED}Error: Failed to build TUI${NC}"
+            echo -e "${YELLOW}Falling back to Bash-only mode...${NC}"
+            exec "$SCRIPT_DIR/install_arch.sh"
+        fi
+    else
+        echo -e "${RED}Error: No pre-compiled TUI binary found and Rust not available${NC}"
+        echo -e "${YELLOW}Falling back to Bash-only mode...${NC}"
+        exec "$SCRIPT_DIR/install_arch.sh"
     fi
-    echo -e "${GREEN}TUI built successfully${NC}"
 fi
 
 # Function to cleanup on exit

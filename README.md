@@ -44,6 +44,8 @@ ArchInstall is designed for users who want the power and flexibility of Arch Lin
 - **Btrfs Snapshots** - Automatic system snapshots with snapper and grub-btrfs
 
 ### 🎨 **User Experience**
+- **🖥️ Text-based User Interface (TUI)** - Beautiful real-time progress display with Arch Linux branding
+- **📊 Live Progress Tracking** - Visual progress bars and status updates during installation
 - **🔍 Interactive Package Selection** - Real-time search and install packages during setup
 - **📦 AUR Package Discovery** - Search AUR packages with web API fallback
 - **🎯 Smart Package Management** - Add/remove packages with intuitive commands
@@ -84,6 +86,14 @@ ArchInstall is designed for users who want the power and flexibility of Arch Lin
    git clone https://github.com/live4thamuzik/ArchInstall.git
    cd ArchInstall
    chmod +x *.sh
+   
+   # Option 1: Run with TUI (recommended)
+   ./launch_tui_installer.sh
+   
+   # Option 2: Run in Bash-only mode
+   ./launch_tui_installer.sh --no-tui
+   
+   # Option 3: Run original installer directly
    ./install_arch.sh
    ```
 
@@ -98,6 +108,52 @@ ArchInstall is designed for users who want the power and flexibility of Arch Lin
    - Reboot into your new system
    - Follow any additional setup instructions
    - Enjoy your Arch Linux installation!
+
+---
+
+## 🖥️ Text-based User Interface (TUI)
+
+> **🆕 New Feature - Beautiful Real-time Progress Display**
+
+ArchInstall now includes a modern TUI built in Rust that provides a beautiful, real-time progress display during installation.
+
+### ✨ **TUI Features:**
+- **🎨 Arch Linux Branding** - Custom ASCII logo and blue color scheme
+- **📊 Live Progress Bars** - Real-time installation progress tracking
+- **📝 Status Updates** - Current phase and detailed status messages
+- **🔄 Auto-refresh** - Updates every second during installation
+- **⌨️ Keyboard Controls** - ESC to exit, H for help, L for logs
+- **🖥️ Terminal Compatibility** - Works with most terminal emulators
+
+### 🚀 **How It Works:**
+1. **Launcher Script** - `launch_tui_installer.sh` handles everything automatically
+2. **Rust TUI** - Beautiful progress display in the main terminal
+3. **Bash Installer** - Runs in a separate terminal window
+4. **Progress Communication** - File-based communication between TUI and installer
+5. **Automatic Cleanup** - All temporary files cleaned up on exit
+
+### 📋 **Installation Options:**
+```bash
+# TUI Mode (recommended) - Beautiful progress display
+./launch_tui_installer.sh
+
+# Bash-only Mode - Traditional text output
+./launch_tui_installer.sh --no-tui
+
+# Direct Installer - Skip launcher entirely
+./install_arch.sh
+```
+
+### 🔧 **Technical Details:**
+- **Built with Rust** - Fast, reliable, and memory-efficient
+- **ratatui Library** - Modern terminal UI framework
+- **File-based Communication** - Progress files in `/tmp/`
+- **Pre-compiled Binary** - TUI binary included in repository for live ISO use
+- **Fallback Support** - Gracefully falls back to Bash mode if needed
+
+### ⚠️ **Requirements:**
+- **Terminal emulator** - xterm, gnome-terminal, konsole, or alacritty
+- **Live ISO compatible** - Works on any Arch Linux live ISO without additional setup
 
 ---
 
