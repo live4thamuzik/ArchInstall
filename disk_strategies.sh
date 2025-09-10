@@ -169,28 +169,7 @@ do_auto_luks_lvm_partitioning() {
     fi
     partprobe "$INSTALL_DISK"
 
-    # 2. EFI Partition (for UEFI) - 1024MiB
-    if [ "$BOOT_MODE" == "uefi" ]; then
-        log_info "Creating EFI partition (${EFI_PART_SIZE_MIB}MiB)..."
-        # Create EFI partition with sgdisk: -n 1:0:+size -t 1:EF00
-        local efi_size_mb="${EFI_PART_SIZE_MIB}M"
-        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:EF00" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
-        partprobe "$INSTALL_DISK"
-        part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
-        
-        # Debug: Show partition info before formatting
-        log_info "EFI partition created at: $part_dev"
-        sgdisk -p "$INSTALL_DISK" || log_warn "Failed to print partition table"
-        
-        format_filesystem "$part_dev" "vfat"
-        capture_id_for_config "efi" "$part_dev" "UUID"
-        capture_id_for_config "efi" "$part_dev" "PARTUUID"
-        safe_mount "$part_dev" "/mnt/boot/efi"
-        current_start_mib=$((current_start_mib + EFI_PART_SIZE_MIB))
-        part_num=$((part_num + 1))
-    fi
-
-    # 3. Dedicated /boot Partition - 2GiB
+    # 2. Dedicated /boot Partition - 2GiB (mount this FIRST)
     log_info "Creating dedicated /boot partition (${BOOT_PART_SIZE_MIB}MiB)..."
     local boot_size_mb="${BOOT_PART_SIZE_MIB}M"
     if [ "$BOOT_MODE" == "uefi" ]; then
@@ -207,6 +186,30 @@ do_auto_luks_lvm_partitioning() {
     safe_mount "$part_dev" "/mnt/boot"
     current_start_mib=$((current_start_mib + BOOT_PART_SIZE_MIB))
     part_num=$((part_num + 1))
+
+    # 3. EFI Partition (for UEFI) - 1024MiB (mounted AFTER /boot partition)
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        log_info "Creating EFI partition (${EFI_PART_SIZE_MIB}MiB)..."
+        # Create EFI partition with sgdisk: -n 1:0:+size -t 1:EF00
+        local efi_size_mb="${EFI_PART_SIZE_MIB}M"
+        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:EF00" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
+        partprobe "$INSTALL_DISK"
+        part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
+        
+        # Debug: Show partition info before formatting
+        log_info "EFI partition created at: $part_dev"
+        sgdisk -p "$INSTALL_DISK" || log_warn "Failed to print partition table"
+        
+        format_filesystem "$part_dev" "vfat"
+        capture_id_for_config "efi" "$part_dev" "UUID"
+        capture_id_for_config "efi" "$part_dev" "PARTUUID"
+        
+        # Create efi directory inside the mounted /boot partition
+        mkdir -p /mnt/boot/efi || error_exit "Failed to create /mnt/boot/efi directory."
+        safe_mount "$part_dev" "/mnt/boot/efi"
+        current_start_mib=$((current_start_mib + EFI_PART_SIZE_MIB))
+        part_num=$((part_num + 1))
+    fi
 
     # 4. Main LUKS Container Partition (takes rest of disk)
     log_info "Creating LUKS container partition (rest of disk)..."
