@@ -83,6 +83,13 @@ get_timezones_in_region() {
     local region_path="$zoneinfo_base_path/$region"
     local timezones=()
 
+    # Special case for US regional timezones
+    if [ "$region" == "US" ]; then
+        timezones=("US/Eastern" "US/Central" "US/Mountain" "US/Pacific" "US/Alaska" "US/Hawaii")
+        echo "${timezones[@]}"
+        return 0
+    fi
+
     if [ ! -d "$region_path" ]; then
         log_warn "Timezone region directory not found: $region_path"
         echo ""
@@ -102,6 +109,127 @@ get_timezones_in_region() {
     IFS=$'\n' timezones=($(sort <<<"${timezones[*]}"))
     unset IFS
     echo "${timezones[@]}"
+}
+
+# Specialized timezone selection with pagination for long lists
+# Args: $1 = region_name, $2 = array_name_containing_timezones, $3 = result_variable_name
+select_timezone_from_list() {
+    local region_name="$1"
+    local array_name="$2"
+    local result_var_name="$3"
+
+    # Get array content using indirect expansion
+    local timezone_array_content=()
+    eval "timezone_array_content=( \"\${${array_name}[@]}\" )"
+
+    if [ ${#timezone_array_content[@]} -eq 0 ]; then
+        error_exit "No timezones provided for selection in region: $region_name"
+    fi
+
+    local total_timezones=${#timezone_array_content[@]}
+    local items_per_page=20
+    local current_page=0
+    local total_pages=$(( (total_timezones + items_per_page - 1) / items_per_page ))
+
+    log_info "Available timezones in $region_name:"
+    
+    if [ $total_timezones -gt $items_per_page ]; then
+        log_info "Showing page 1 of $total_pages (20 items per page)"
+        log_info "Commands: 'n' (next page), 'p' (previous page), 's' (search), or enter number (1-$total_timezones)"
+    else
+        log_info "Enter choice number (1-$total_timezones):"
+    fi
+
+    while true; do
+        # Clear screen and show current page
+        clear
+        log_info "Available timezones in $region_name:"
+        
+        if [ $total_timezones -gt $items_per_page ]; then
+            log_info "Page $((current_page + 1)) of $total_pages (showing items $((current_page * items_per_page + 1))-$(( (current_page + 1) * items_per_page < total_timezones ? (current_page + 1) * items_per_page : total_timezones )) of $total_timezones)"
+        fi
+
+        # Display current page
+        local start_idx=$((current_page * items_per_page))
+        local end_idx=$(( (current_page + 1) * items_per_page < total_timezones ? (current_page + 1) * items_per_page : total_timezones ))
+        
+        for ((i=start_idx; i<end_idx; i++)); do
+            echo "  $((i+1)). ${timezone_array_content[$i]}"
+        done
+
+        if [ $total_timezones -gt $items_per_page ]; then
+            echo ""
+            echo "Commands: 'n' (next), 'p' (previous), 's' (search), 'q' (quit), or enter number (1-$total_timezones)"
+        else
+            echo ""
+            echo "Enter choice number (1-$total_timezones):"
+        fi
+
+        local choice
+        read -rp "> " choice
+        choice=$(trim_string "$choice")
+
+        # Handle navigation commands
+        if [ "$choice" == "n" ] && [ $total_timezones -gt $items_per_page ]; then
+            if [ $current_page -lt $((total_pages - 1)) ]; then
+                current_page=$((current_page + 1))
+                continue
+            else
+                log_warn "Already on the last page."
+                sleep 1
+                continue
+            fi
+        elif [ "$choice" == "p" ] && [ $total_timezones -gt $items_per_page ]; then
+            if [ $current_page -gt 0 ]; then
+                current_page=$((current_page - 1))
+                continue
+            else
+                log_warn "Already on the first page."
+                sleep 1
+                continue
+            fi
+        elif [ "$choice" == "s" ] && [ $total_timezones -gt $items_per_page ]; then
+            # Search functionality
+            local search_term=""
+            read -rp "Enter search term (case-insensitive): " search_term
+            search_term=$(trim_string "$search_term")
+            
+            if [ -n "$search_term" ]; then
+                log_info "Searching for timezones containing '$search_term'..."
+                local found_count=0
+                for ((i=0; i<total_timezones; i++)); do
+                    if echo "${timezone_array_content[$i]}" | grep -qi "$search_term"; then
+                        echo "  $((i+1)). ${timezone_array_content[$i]}"
+                        found_count=$((found_count + 1))
+                    fi
+                done
+                
+                if [ $found_count -eq 0 ]; then
+                    log_warn "No timezones found containing '$search_term'"
+                else
+                    log_info "Found $found_count matching timezone(s). Enter the number to select:"
+                    read -rp "> " choice
+                    choice=$(trim_string "$choice")
+                fi
+            fi
+        elif [ "$choice" == "q" ]; then
+            error_exit "Timezone selection cancelled by user."
+        fi
+
+        # Handle numeric selection
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= total_timezones )); then
+            # Assign result using indirect expansion
+            eval "${result_var_name}=\"${timezone_array_content[$((choice-1))]}\""
+            log_info "Selected: ${!result_var_name}"
+            return 0
+        else
+            log_warn "Invalid choice. Please enter a number between 1 and $total_timezones"
+            if [ $total_timezones -gt $items_per_page ]; then
+                log_warn "or use 'n' (next), 'p' (previous), 's' (search), 'q' (quit)"
+            fi
+            sleep 2
+        fi
+    done
 }
 
 configure_wifi_live_dialog() {
@@ -388,40 +516,21 @@ gather_installation_details() {
         error_exit "Timezone region selection failed."
     fi
 
-    local proposed_timezone_examples=""
-    case "$selected_region" in
-        "America") proposed_timezone_examples="e.g., America/New_York, America/Chicago, America/Los_Angeles";;
-        "Europe")  proposed_timezone_examples="e.g., Europe/London, Europe/Berlin, Europe/Paris";;
-        "Asia")    proposed_timezone_examples="e.g., Asia/Tokyo, Asia/Shanghai, Asia/Kolkata";;
-        "Australia") proposed_timezone_examples="e.g., Australia/Sydney, Australia/Perth";;
-        # Add more examples for other regions if desired
-        *) proposed_timezone_examples="e.g., $selected_region/CityName";;
-    esac
+    # Get all timezones for the selected region
+    local region_timezones=($(get_timezones_in_region "$selected_region"))
+    
+    if [ ${#region_timezones[@]} -eq 0 ]; then
+        error_exit "No timezones found for region '$selected_region'"
+    fi
 
-    local chosen_timezone_input=""
-    while true; do
-        read -rp "Enter specific city/timezone (e.g., ${selected_region}/CityName, $proposed_timezone_examples): " chosen_timezone_input
-        chosen_timezone_input=$(trim_string "$chosen_timezone_input")
+    # Use specialized timezone selection for long lists
+    local selected_timezone=""
+    select_timezone_from_list "$selected_region" region_timezones selected_timezone
+    if [ "$?" -ne 0 ]; then
+        error_exit "Timezone selection failed."
+    fi
 
-        if [ -f "/usr/share/zoneinfo/$chosen_timezone_input" ]; then
-            TIMEZONE="$chosen_timezone_input"
-            break
-        else
-            log_warn "Timezone '$chosen_timezone_input' not found or is invalid. Please try again."
-            local list_all_timezones=""
-            prompt_yes_no "Do you want to see a list of ALL timezones in '$selected_region'?" list_all_timezones
-            if [ "$list_all_timezones" == "yes" ]; then
-                log_info "Listing all timezones in '$selected_region':"
-                local all_timezones_in_region=($(get_timezones_in_region "$selected_region"))
-                if [ ${#all_timezones_in_region[@]} -gt 0 ]; then
-                    printf '%s\n' "${all_timezones_in_region[@]}"
-                else
-                    log_warn "No timezones found for this region, this should not happen. Please check /usr/share/zoneinfo."
-                fi
-                log_info "Please copy the exact timezone name from the list and re-enter above."
-            fi
-        fi
-    done
+    TIMEZONE="$selected_timezone"
     log_info "System timezone set to: $TIMEZONE"
 
     # Localization (Locale & Keymap).

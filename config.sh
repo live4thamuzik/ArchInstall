@@ -285,6 +285,7 @@ declare -a TIMEZONE_REGIONS=(
     "Europe"
     "Indian"
     "Pacific"
+    "US"  # US regional timezones (US/Eastern, US/Pacific, etc.)
 )
 
 # Common locales. Add/remove as needed. 'en_US.UTF-8' is standard.
