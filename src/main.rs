@@ -25,14 +25,14 @@ pub struct InstallerState {
 impl Default for InstallerState {
     fn default() -> Self {
         Self {
-            current_phase: "Initializing...".to_string(),
+            current_phase: "Ready".to_string(),
             progress: 0,
-            status_message: "Starting Arch Linux installation...".to_string(),
-            disk: "/dev/nvme0n1 (500GB)".to_string(),
-            strategy: "LUKS+LVM".to_string(),
-            boot_mode: "UEFI".to_string(),
-            desktop: "KDE Plasma".to_string(),
-            username: "l4tm".to_string(),
+            status_message: "Waiting for installation to start...".to_string(),
+            disk: "Not selected".to_string(),
+            strategy: "Not selected".to_string(),
+            boot_mode: "Not selected".to_string(),
+            desktop: "Not selected".to_string(),
+            username: "Not selected".to_string(),
         }
     }
 }
@@ -41,6 +41,7 @@ impl Default for InstallerState {
 const PROGRESS_FILE: &str = "/tmp/archinstall_progress";
 const STATUS_FILE: &str = "/tmp/archinstall_status";
 const PHASE_FILE: &str = "/tmp/archinstall_phase";
+const CONFIG_FILE: &str = "/tmp/archinstall_config";
 
 // Read progress from files
 fn read_progress() -> u16 {
@@ -67,6 +68,21 @@ fn read_phase() -> String {
     }
 }
 
+// Read configuration from file
+fn read_config() -> (String, String, String, String, String) {
+    if let Ok(content) = fs::read_to_string(CONFIG_FILE) {
+        if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+            let disk = config["disk"].as_str().unwrap_or("Not selected").to_string();
+            let strategy = config["strategy"].as_str().unwrap_or("Not selected").to_string();
+            let boot_mode = config["boot_mode"].as_str().unwrap_or("Not selected").to_string();
+            let desktop = config["desktop"].as_str().unwrap_or("Not selected").to_string();
+            let username = config["username"].as_str().unwrap_or("Not selected").to_string();
+            return (disk, strategy, boot_mode, desktop, username);
+        }
+    }
+    ("Not selected".to_string(), "Not selected".to_string(), "Not selected".to_string(), "Not selected".to_string(), "Not selected".to_string())
+}
+
 // Check if installation is running
 fn is_installation_running() -> bool {
     Path::new(PROGRESS_FILE).exists()
@@ -91,6 +107,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             app_state.progress = read_progress();
             app_state.status_message = read_status();
             app_state.current_phase = read_phase();
+            
+            // Update configuration if available
+            let (disk, strategy, boot_mode, desktop, username) = read_config();
+            app_state.disk = disk;
+            app_state.strategy = strategy;
+            app_state.boot_mode = boot_mode;
+            app_state.desktop = desktop;
+            app_state.username = username;
         } else {
             // Installation not running, show waiting message
             app_state.status_message = "Waiting for installation to start...".to_string();
