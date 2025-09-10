@@ -28,6 +28,7 @@ execute_disk_strategy() {
 # --- Specific Partitioning Strategy Implementations ---
 
 do_auto_simple_partitioning() {
+    echo "=== PHASE 1: Disk Partitioning ==="
     log_info "Starting auto simple partitioning for $INSTALL_DISK (Boot Mode: $BOOT_MODE)..."
 
     wipe_disk "$INSTALL_DISK"
@@ -152,6 +153,7 @@ do_auto_simple_partitioning() {
 }
 
 do_auto_luks_lvm_partitioning() {
+    echo "=== PHASE 1: Disk Partitioning (LUKS+LVM) ==="
     log_info "Starting auto LUKS+LVM partitioning for $INSTALL_DISK (Boot Mode: $BOOT_MODE)..."
 
     wipe_disk "$INSTALL_DISK"
@@ -234,6 +236,7 @@ do_auto_luks_lvm_partitioning() {
 }
 
 do_auto_raid_luks_lvm_partitioning() {
+    echo "=== PHASE 1: Disk Partitioning (RAID+LUKS+LVM) ==="
     log_info "Starting auto RAID+LUKS+LVM partitioning with disks: ${RAID_DEVICES[*]} (Boot Mode: $BOOT_MODE)..."
 
     if [ ${#RAID_DEVICES[@]} -lt 2 ]; then error_exit "RAID requires at least 2 disks."; fi

@@ -336,28 +336,15 @@ safe_mount() {
     local dev="$1"
     local mnt="$2"
     
-    # Debug: Check if device exists
-    log_info "DEBUG: Device path: $dev"
-    log_info "DEBUG: Mount point: $mnt"
     if [ ! -b "$dev" ]; then
         error_exit "Device $dev does not exist or is not a block device."
     fi
     
     mkdir -p "$mnt" || error_exit "Failed to create mount point $mnt."
-    log_info "Mounting $dev to $mnt..."
     
     # For EFI partitions, use specific mount options
     if [[ "$mnt" == *"/boot/efi"* ]]; then
-        log_info "Mounting EFI partition with specific options..."
-        log_info "DEBUG: About to mount EFI partition $dev to $mnt"
         mount -t vfat -o rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro "$dev" "$mnt" || error_exit "Failed to mount EFI partition $dev to $mnt."
-        log_info "DEBUG: EFI partition mounted successfully"
-        # Verify the mount worked
-        if [ ! -d "$mnt" ] || [ -z "$(ls -A "$mnt" 2>/dev/null)" ]; then
-            log_warn "DEBUG: EFI mount point $mnt appears empty or not accessible"
-        else
-            log_info "DEBUG: EFI mount point $mnt is accessible and contains files"
-        fi
     else
         mount "$dev" "$mnt" || error_exit "Failed to mount $dev to $mnt."
     fi
@@ -627,6 +614,7 @@ configure_mirrors_live() {
 # Runs pacstrap to install the base system into /mnt.
 # Global: KERNEL_TYPE (e.g., "linux", "linux-lts")
 run_pacstrap_base_install() {
+    echo "=== PHASE 2: Package Installation ==="
     log_info "Running pacstrap to install base system packages..."
     
     # Pass all arguments passed to run_pacstrap_base_install directly to pacstrap
@@ -938,6 +926,7 @@ configure_bootloader_chroot() {
 
 # Installs GRUB bootloader with comprehensive validation
 install_grub_bootloader() {
+    echo "=== PHASE 3: Bootloader Installation ==="
     log_info "Installing GRUB bootloader..."
     
     # Ensure GRUB package is installed
@@ -2025,12 +2014,6 @@ run_in_chroot() {
     local script_to_run="$1"
     
     log_info "Executing chroot script: ${script_to_run}"
-    
-    # Bind-mount EFI partition if it exists in the live environment
-    if mountpoint -q "/mnt/boot/efi"; then
-        log_info "Bind-mounting EFI partition for chroot access..."
-        mount --bind /mnt/boot/efi /mnt/boot/efi || log_warn "Failed to bind-mount EFI partition"
-    fi
     
     # arch-chroot handles mounting /proc, /sys, /dev, etc. automatically
     arch-chroot /mnt /bin/bash -c "${script_to_run}" || error_exit "Chroot script execution failed: ${script_to_run}"

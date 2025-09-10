@@ -75,6 +75,7 @@ _log_success() { echo -e "\n\e[32;1m============================================
 # Performs all post-installation configuration inside the chroot environment
 # Global: All configuration variables exported from install_arch.sh
 # Begin chroot configuration (no wrapper function)
+    echo "=== PHASE 4: System Configuration ==="
     _log_info "Starting chroot configuration."
     
     # Verify essential variables are present (concise)
