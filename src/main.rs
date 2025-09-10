@@ -261,7 +261,7 @@ fn ui(f: &mut Frame, app_state: &InstallerState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(6),  // Header (increased for ASCII art)
+            Constraint::Length(7),  // Header (increased for new ASCII art)
             Constraint::Length(3),  // Progress bar
             Constraint::Length(3),  // Status message
             Constraint::Length(8),  // Configuration panel
@@ -292,19 +292,22 @@ fn ui(f: &mut Frame, app_state: &InstallerState) {
 fn render_header(f: &mut Frame, area: Rect) {
     let header_text = vec![
         Line::from(vec![
-            Span::styled("    _    ____  _   _ _     _ _       _     _ _   ", Style::default().fg(Color::Cyan)),
+            Span::styled("  █████╗ ██████╗  ██████╗██╗  ██╗██╗███╗   ██╗███████╗████████╗ █████╗ ██╗     ██╗     ", Style::default().fg(Color::Cyan)),
         ]),
         Line::from(vec![
-            Span::styled("   / \\  / ___|| | | | |   (_) | __ _| |__ | | |  ", Style::default().fg(Color::Cyan)),
+            Span::styled(" ██╔══██╗██╔══██╗██╔════╝██║  ██║██║████╗  ██║██╔════╝╚══██╔══╝██╔══██╗██║     ██║     ", Style::default().fg(Color::Cyan)),
         ]),
         Line::from(vec![
-            Span::styled("  / _ \\ \\___ \\| |_| | |   | | |/ _` | '_ \\| | |  ", Style::default().fg(Color::Cyan)),
+            Span::styled(" ███████║██████╔╝██║     ███████║██║██╔██╗ ██║███████╗   ██║   ███████║██║     ██║     ", Style::default().fg(Color::Cyan)),
         ]),
         Line::from(vec![
-            Span::styled(" / ___ \\ ___) |  _  | |___| | | (_| | | | | | |  ", Style::default().fg(Color::Cyan)),
+            Span::styled(" ██╔══██║██╔══██╗██║     ██╔══██║██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██║     ", Style::default().fg(Color::Cyan)),
         ]),
         Line::from(vec![
-            Span::styled("/_/   \\_\\____/|_| |_|_____|_|_|\\__,_|_| |_|_|_|  ", Style::default().fg(Color::Cyan)),
+            Span::styled(" ██║  ██║██║  ██║╚██████╗██║  ██║██║██║ ╚████║███████║   ██║   ██║  ██║███████╗███████╗", Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::styled(" ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚══════╝", Style::default().fg(Color::Cyan)),
         ]),
     ];
 
