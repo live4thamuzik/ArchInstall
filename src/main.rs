@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Wrap},
     Frame, Terminal,
 };
 use std::io::{stdout, BufRead, BufReader};
@@ -29,9 +29,6 @@ pub struct InstallerState {
     pub installer_output: Vec<String>,
     pub is_running: bool,
     pub is_complete: bool,
-    pub is_collecting_input: bool,
-    pub current_input_field: String,
-    pub input_buffer: String,
 }
 
 impl Default for InstallerState {
@@ -48,9 +45,6 @@ impl Default for InstallerState {
             installer_output: Vec::new(),
             is_running: false,
             is_complete: false,
-            is_collecting_input: false,
-            current_input_field: "".to_string(),
-            input_buffer: "".to_string(),
         }
     }
 }
@@ -117,20 +111,6 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                             // Handle Ctrl+C
                             break;
                         }
-                        KeyCode::Enter if current_state.is_collecting_input => {
-                            // Handle input submission
-                            handle_input_submission(&mut state);
-                        }
-                        KeyCode::Backspace if current_state.is_collecting_input => {
-                            // Handle backspace
-                            if !state.input_buffer.is_empty() {
-                                state.input_buffer.pop();
-                            }
-                        }
-                        KeyCode::Char(c) if current_state.is_collecting_input => {
-                            // Handle character input
-                            state.input_buffer.push(c);
-                        }
                         _ => {}
                     }
                 }
@@ -158,56 +138,21 @@ fn restore_terminal() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn start_installer(app_state: Arc<Mutex<InstallerState>>) {
-    // Start input collection instead of running installer directly
+    // Start the installer directly
     {
         let mut state = app_state.lock().unwrap();
         state.is_running = true;
-        state.is_collecting_input = true;
-        state.current_phase = "Gathering Installation Details".to_string();
-        state.status_message = "Collecting user preferences...".to_string();
+        state.current_phase = "Starting Installation".to_string();
+        state.status_message = "Launching installer...".to_string();
         state.progress = 10;
-        state.current_input_field = "hostname".to_string();
-        state.input_buffer = "".to_string();
     }
+    
+    // Start the actual installer in a separate thread
+    thread::spawn(move || {
+        run_actual_installer(app_state);
+    });
 }
 
-fn handle_input_submission(state: &mut InstallerState) {
-    let input = state.input_buffer.clone();
-    state.input_buffer.clear();
-    
-    match state.current_input_field.as_str() {
-        "hostname" => {
-            state.username = input.clone(); // For now, use hostname as username
-            state.current_input_field = "disk".to_string();
-            state.status_message = "Select disk (type disk name):".to_string();
-        }
-        "disk" => {
-            state.disk = input;
-            state.current_input_field = "strategy".to_string();
-            state.status_message = "Select strategy (auto/manual):".to_string();
-        }
-        "strategy" => {
-            state.strategy = input;
-            state.current_input_field = "desktop".to_string();
-            state.status_message = "Select desktop (gnome/kde/hyprland/server):".to_string();
-        }
-        "desktop" => {
-            state.desktop = input;
-            // All input collected, start the actual installer
-            state.is_collecting_input = false;
-            state.current_phase = "Starting Installation".to_string();
-            state.status_message = "Launching installer...".to_string();
-            state.progress = 20;
-            
-            // Start the actual installer in a separate thread
-            let app_state = Arc::new(Mutex::new(state.clone()));
-            thread::spawn(move || {
-                run_actual_installer(app_state);
-            });
-        }
-        _ => {}
-    }
-}
 
 fn run_actual_installer(app_state: Arc<Mutex<InstallerState>>) {
     // Run the actual installer with collected parameters
@@ -391,17 +336,19 @@ fn render_progress(f: &mut Frame, area: Rect, app_state: &InstallerState) {
 }
 
 fn render_status(f: &mut Frame, area: Rect, app_state: &InstallerState) {
-    let status_text = if app_state.is_collecting_input {
-        format!("{}: {}", app_state.status_message, app_state.input_buffer)
-    } else if app_state.status_message.len() > 50 {
-        format!("{}...", &app_state.status_message[..47])
+    // Calculate available width for text (accounting for borders and padding)
+    let available_width = if area.width > 4 { area.width - 4 } else { 1 };
+    
+    let status_text = if app_state.status_message.len() > available_width as usize {
+        format!("{}...", &app_state.status_message[..(available_width as usize - 3)])
     } else {
         app_state.status_message.clone()
     };
 
     let status = Paragraph::new(status_text)
         .block(Block::default().title("Status").borders(Borders::ALL))
-        .style(Style::default().fg(Color::White));
+        .style(Style::default().fg(Color::White))
+        .wrap(Wrap { trim: true });
 
     f.render_widget(status, area);
 }
@@ -434,9 +381,7 @@ fn render_output(f: &mut Frame, area: Rect, app_state: &InstallerState) {
 }
 
 fn render_instructions(f: &mut Frame, area: Rect, app_state: &InstallerState) {
-    let instructions = if app_state.is_collecting_input {
-        "Type your input and press Enter. Press 'q' to quit"
-    } else if app_state.is_running {
+    let instructions = if app_state.is_running {
         "Installation in progress... Press 'q' to quit"
     } else if app_state.is_complete {
         "Installation complete! Press 'q' to quit"
