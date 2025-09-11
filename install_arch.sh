@@ -10,14 +10,14 @@ source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/dialogs.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/disk_strategies.sh"
-# Progress communication removed - now handled by TUI directly
+# TUI integration - progress is handled directly by the TUI process
 
 # --- Main Installation Function ---
 main() {
     # Initialize enhanced logging system
     setup_logging
     
-    # Progress communication now handled by TUI directly
+    # TUI integration - progress tracking handled by TUI process
     
     log_header "Arch Linux Automated Installer"
     
@@ -215,8 +215,7 @@ main() {
     # Preserve logs for successful installation
     preserve_logs "success"
     
-    # Cleanup progress files
-    # Progress cleanup no longer needed
+    # TUI cleanup handled automatically by TUI process
     
     prompt_reboot_system
 }
@@ -239,7 +238,7 @@ handle_installation_error() {
     
     # Update progress to show failure
     echo "Installation failed!"
-    # Progress cleanup no longer needed
+    # TUI will handle progress updates automatically
     
     # Preserve logs for failed installation
     preserve_logs "failure"
@@ -262,7 +261,7 @@ handle_installation_interrupt() {
     
     # Update progress to show interruption
     echo "Installation interrupted!"
-    # Progress cleanup no longer needed
+    # TUI will handle progress updates automatically
     
     # Preserve logs for interrupted installation
     preserve_logs "interrupted"
