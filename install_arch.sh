@@ -206,6 +206,8 @@ main() {
             if [ -n "${PARTITION_UUIDS_EFI_UUID:-}" ]; then
                 local efi_dev="/dev/disk/by-uuid/$PARTITION_UUIDS_EFI_UUID"
                 if [ -b "$efi_dev" ]; then
+                    log_info "Creating /mnt/boot/efi directory..."
+                    mkdir -p "/mnt/boot/efi" || error_exit "Failed to create /mnt/boot/efi directory"
                     log_info "Remounting EFI partition from UUID: $efi_dev"
                     mount -t vfat -o rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro "$efi_dev" "/mnt/boot/efi" || error_exit "Failed to remount EFI partition"
                 else
