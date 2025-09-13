@@ -137,9 +137,11 @@ _log_success() { echo -e "\n\e[32;1m============================================
 
     # --- Phase 2: Bootloader & Initramfs ---
     _log_info "Configuring bootloader, GRUB defaults, theme, and mkinitpio hooks."
-    configure_bootloader_chroot || _log_error "Bootloader installation failed."
-
+    
+    # Configure GRUB defaults BEFORE installing GRUB (required for encryption support)
     configure_grub_defaults_chroot || _log_error "GRUB default configuration failed."
+    
+    configure_bootloader_chroot || _log_error "Bootloader installation failed."
 
     # Configure GRUB theme only (final GRUB config after initramfs rebuild)
     if [ "$BOOTLOADER_TYPE" == "grub" ]; then

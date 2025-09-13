@@ -1334,8 +1334,8 @@ configure_plymouth_chroot() {
 }
 
 # Configures GRUB defaults inside chroot environment.
-# Global: BOOTLOADER_TYPE, ENABLE_OS_PROBER, GRUB_TIMEOUT_DEFAULT
-# Sets GRUB timeout and OS prober configuration
+# Global: BOOTLOADER_TYPE, ENABLE_OS_PROBER, GRUB_TIMEOUT_DEFAULT, WANT_ENCRYPTION
+# Sets GRUB timeout, OS prober, and encryption support configuration
 configure_grub_defaults_chroot() {
     log_info "Configuring GRUB defaults..."
     if [ "$BOOTLOADER_TYPE" == "grub" ]; then
@@ -1345,6 +1345,12 @@ configure_grub_defaults_chroot() {
         # Enable OS prober if requested
         if [ "$ENABLE_OS_PROBER" == "yes" ]; then
             edit_file_in_chroot "/etc/default/grub" "s/^#GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/"
+        fi
+        
+        # Enable cryptodisk support for encrypted systems (required before grub-install)
+        if [ "$WANT_ENCRYPTION" == "yes" ]; then
+            log_info "Enabling GRUB cryptodisk support for encrypted system..."
+            edit_file_in_chroot "/etc/default/grub" "s/^#GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=y/"
         fi
     fi
     log_info "GRUB defaults configured."
