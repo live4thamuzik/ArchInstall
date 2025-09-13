@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Wrap, Clear},
     Frame, Terminal,
 };
 use std::io::{stdout, BufRead, BufReader};
@@ -29,14 +29,17 @@ pub struct InstallerState {
     pub installer_output: Vec<String>,
     pub is_running: bool,
     pub is_complete: bool,
+    pub is_configuring: bool,
+    pub config_step: usize,
+    pub config_values: Vec<String>,
 }
 
 impl Default for InstallerState {
     fn default() -> Self {
         Self {
-            current_phase: "Ready".to_string(),
+            current_phase: "Configuration".to_string(),
             progress: 0,
-            status_message: "Press 's' to start installation...".to_string(),
+            status_message: "Press 's' to start configuration...".to_string(),
             disk: "Not selected".to_string(),
             strategy: "Not selected".to_string(),
             boot_mode: "Not selected".to_string(),
@@ -45,6 +48,17 @@ impl Default for InstallerState {
             installer_output: Vec::new(),
             is_running: false,
             is_complete: false,
+            is_configuring: true,
+            config_step: 0,
+            config_values: vec![
+                "auto_luks_lvm".to_string(),  // Partitioning strategy
+                "gnome".to_string(),          // Desktop environment
+                "l4tm".to_string(),           // Username
+                "ArchBTW".to_string(),        // Hostname
+                "yes".to_string(),            // Encryption
+                "yes".to_string(),            // Multilib
+                "paru".to_string(),           // AUR helper
+            ],
         }
     }
 }
@@ -106,20 +120,45 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                             break;
                         }
                         KeyCode::Char('s') => {
-                            // Check if we can start the installer
-                            let can_start = {
-                                let state = app_state.lock().unwrap();
-                                !state.is_running && !state.is_complete
-                            };
-                            
-                            if can_start {
-                                // Start the installer
-                                start_installer(Arc::clone(&app_state));
+                            let mut state = app_state.lock().unwrap();
+                            if state.is_configuring {
+                                // Start configuration process
+                                state.is_configuring = false;
+                                state.is_running = true;
+                                state.current_phase = "Starting Installation".to_string();
+                                state.status_message = "Launching installer with configuration...".to_string();
+                                state.progress = 10;
+                                
+                                // Start the installer with configuration
+                                let config_values = state.config_values.clone();
+                                drop(state); // Release lock before spawning thread
+                                start_installer_with_config(Arc::clone(&app_state), config_values);
                             }
                         }
                         KeyCode::Char('c') if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
                             // Handle Ctrl+C
                             break;
+                        }
+                        KeyCode::Up => {
+                            // Navigate configuration options
+                            let mut state = app_state.lock().unwrap();
+                            if state.is_configuring && state.config_step > 0 {
+                                state.config_step -= 1;
+                            }
+                        }
+                        KeyCode::Down => {
+                            // Navigate configuration options
+                            let mut state = app_state.lock().unwrap();
+                            if state.is_configuring && state.config_step < 6 {
+                                state.config_step += 1;
+                            }
+                        }
+                        KeyCode::Left | KeyCode::Right => {
+                            // Change configuration values
+                            let mut state = app_state.lock().unwrap();
+                            if state.is_configuring {
+                                change_config_value(&mut state);
+                            }
                         }
                         _ => {}
                     }
@@ -144,34 +183,95 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn restore_terminal() -> Result<(), Box<dyn std::error::Error>> {
-    // Restore terminal state
-    crossterm::terminal::disable_raw_mode()?;
-    crossterm::execute!(stdout(), crossterm::terminal::LeaveAlternateScreen)?;
-    Ok(())
+fn change_config_value(state: &mut InstallerState) {
+    match state.config_step {
+        0 => { // Partitioning strategy
+            state.config_values[0] = match state.config_values[0].as_str() {
+                "auto_simple" => "auto_luks_lvm".to_string(),
+                "auto_luks_lvm" => "auto_simple".to_string(),
+                _ => "auto_luks_lvm".to_string(),
+            };
+        }
+        1 => { // Desktop environment
+            state.config_values[1] = match state.config_values[1].as_str() {
+                "gnome" => "kde".to_string(),
+                "kde" => "hyprland".to_string(),
+                "hyprland" => "none".to_string(),
+                "none" => "gnome".to_string(),
+                _ => "gnome".to_string(),
+            };
+        }
+        2 => { // Username
+            state.config_values[2] = match state.config_values[2].as_str() {
+                "l4tm" => "user".to_string(),
+                "user" => "admin".to_string(),
+                "admin" => "l4tm".to_string(),
+                _ => "l4tm".to_string(),
+            };
+        }
+        3 => { // Hostname
+            state.config_values[3] = match state.config_values[3].as_str() {
+                "ArchBTW" => "archlinux".to_string(),
+                "archlinux" => "mypc".to_string(),
+                "mypc" => "ArchBTW".to_string(),
+                _ => "ArchBTW".to_string(),
+            };
+        }
+        4 => { // Encryption
+            state.config_values[4] = match state.config_values[4].as_str() {
+                "yes" => "no".to_string(),
+                "no" => "yes".to_string(),
+                _ => "yes".to_string(),
+            };
+        }
+        5 => { // Multilib
+            state.config_values[5] = match state.config_values[5].as_str() {
+                "yes" => "no".to_string(),
+                "no" => "yes".to_string(),
+                _ => "yes".to_string(),
+            };
+        }
+        6 => { // AUR helper
+            state.config_values[6] = match state.config_values[6].as_str() {
+                "paru" => "yay".to_string(),
+                "yay" => "none".to_string(),
+                "none" => "paru".to_string(),
+                _ => "paru".to_string(),
+            };
+        }
+        _ => {}
+    }
 }
 
-fn start_installer(app_state: Arc<Mutex<InstallerState>>) {
-    // Start the installer directly
-    {
-        let mut state = app_state.lock().unwrap();
-        state.is_running = true;
-        state.current_phase = "Starting Installation".to_string();
-        state.status_message = "Launching installer...".to_string();
-        state.progress = 10;
-    }
-    
-    // Start the actual installer in a separate thread
+fn start_installer_with_config(app_state: Arc<Mutex<InstallerState>>, config_values: Vec<String>) {
+    // Start the installer in a separate thread
     thread::spawn(move || {
-        run_actual_installer(app_state);
+        run_actual_installer(app_state, config_values);
     });
 }
 
+fn run_actual_installer(app_state: Arc<Mutex<InstallerState>>, config_values: Vec<String>) {
+    // Create a temporary config file with the selected options
+    let config_content = format!(
+        "PARTITION_SCHEME=\"{}\"\n\
+         DESKTOP_ENVIRONMENT=\"{}\"\n\
+         MAIN_USERNAME=\"{}\"\n\
+         SYSTEM_HOSTNAME=\"{}\"\n\
+         WANT_ENCRYPTION=\"{}\"\n\
+         WANT_MULTILIB=\"{}\"\n\
+         AUR_HELPER_CHOICE=\"{}\"\n",
+        config_values[0], config_values[1], config_values[2], 
+        config_values[3], config_values[4], config_values[5], config_values[6]
+    );
+    
+    // Write config to temporary file
+    std::fs::write("/tmp/archinstall_config", config_content)
+        .expect("Failed to write config file");
 
-fn run_actual_installer(app_state: Arc<Mutex<InstallerState>>) {
     // Run the actual installer with collected parameters
     let mut child = Command::new("bash")
         .arg("./install_arch.sh")
+        .env("ARCHINSTALL_CONFIG", "/tmp/archinstall_config")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -262,22 +362,6 @@ fn parse_installer_output(app_state: &Arc<Mutex<InstallerState>>, line: &str) {
         state.progress = 100;
         state.status_message = "Installation complete!".to_string();
         state.is_complete = true;
-    } else if line.contains("Collecting installation preferences") {
-        state.current_phase = "Collecting Preferences".to_string();
-        state.progress = 10;
-        state.status_message = "Collecting user preferences...".to_string();
-    } else if line.contains("Checking prerequisites") {
-        state.status_message = "Checking prerequisites...".to_string();
-    } else if line.contains("Prerequisites met") {
-        state.status_message = "Prerequisites verified".to_string();
-    } else if line.contains("Configuring mirrors") {
-        state.status_message = "Configuring package mirrors...".to_string();
-    } else if line.contains("Pacstrap essentials") {
-        state.status_message = "Installing base packages...".to_string();
-    } else if line.contains("Generating fstab") {
-        state.status_message = "Generating filesystem table...".to_string();
-    } else if line.contains("Running chroot config") {
-        state.status_message = "Configuring system in chroot...".to_string();
     } else if line.contains("Disk partitioning complete") {
         state.progress = 30;
         state.status_message = "Disk partitioning completed".to_string();
@@ -294,51 +378,6 @@ fn parse_installer_output(app_state: &Arc<Mutex<InstallerState>>, line: &str) {
         state.status_message = "Installation interrupted by user".to_string();
         state.is_complete = true;
     }
-    
-    // Parse configuration updates with exact patterns from installer output
-    if line.contains("Selected disk:") {
-        if let Some(disk_part) = line.split("Selected disk:").nth(1) {
-            // Extract just the disk name (before the size in parentheses)
-            let disk = disk_part.split('(').next().unwrap_or(disk_part).trim();
-            state.disk = disk.to_string();
-        }
-    } else if line.contains("Selected strategy:") {
-        if let Some(strategy) = line.split("Selected strategy:").nth(1) {
-            state.strategy = strategy.trim().to_string();
-        }
-    } else if line.contains("Selected desktop:") {
-        if let Some(desktop) = line.split("Selected desktop:").nth(1) {
-            state.desktop = desktop.trim().to_string();
-        }
-    } else if line.contains("Username:") && !line.contains("Main User:") {
-        if let Some(username) = line.split("Username:").nth(1) {
-            state.username = username.trim().to_string();
-        }
-    } else if line.contains("Boot Mode:") {
-        if let Some(boot_mode) = line.split("Boot Mode:").nth(1) {
-            state.boot_mode = boot_mode.trim().to_string();
-        }
-    } else if line.contains("Desktop Env:") {
-        if let Some(desktop) = line.split("Desktop Env:").nth(1) {
-            state.desktop = desktop.trim().to_string();
-        }
-    } else if line.contains("Disk:") && line.contains("Boot Mode:") {
-        // This is from the summary display - extract disk and boot mode
-        if let Some(disk_part) = line.split("Disk:").nth(1) {
-            if let Some(disk) = disk_part.split_whitespace().next() {
-                state.disk = disk.to_string();
-            }
-        }
-        if let Some(boot_part) = line.split("Boot Mode:").nth(1) {
-            if let Some(boot_mode) = boot_part.split_whitespace().next() {
-                state.boot_mode = boot_mode.to_string();
-            }
-        }
-    } else if line.contains("Partitioning:") {
-        if let Some(strategy) = line.split("Partitioning:").nth(1) {
-            state.strategy = strategy.trim().to_string();
-        }
-    }
 }
 
 fn ui(f: &mut Frame, app_state: &InstallerState) {
@@ -350,6 +389,66 @@ fn ui(f: &mut Frame, app_state: &InstallerState) {
         return;
     }
     
+    if app_state.is_configuring {
+        render_configuration_ui(f, app_state);
+    } else {
+        render_installation_ui(f, app_state);
+    }
+}
+
+fn render_configuration_ui(f: &mut Frame, app_state: &InstallerState) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(7),  // Header
+            Constraint::Length(3),  // Title
+            Constraint::Min(10),    // Configuration options
+            Constraint::Length(3),  // Instructions
+        ])
+        .split(f.size());
+
+    // Header with ASCII art
+    render_header(f, chunks[0]);
+
+    // Title
+    let title = Paragraph::new("Arch Linux Installation Configuration")
+        .block(Block::default().borders(Borders::ALL))
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::Cyan));
+    f.render_widget(title, chunks[1]);
+
+    // Configuration options
+    let config_items = vec![
+        ListItem::new(format!("Partitioning Strategy: {}", app_state.config_values[0]))
+            .style(if app_state.config_step == 0 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("Desktop Environment: {}", app_state.config_values[1]))
+            .style(if app_state.config_step == 1 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("Username: {}", app_state.config_values[2]))
+            .style(if app_state.config_step == 2 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("Hostname: {}", app_state.config_values[3]))
+            .style(if app_state.config_step == 3 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("Encryption: {}", app_state.config_values[4]))
+            .style(if app_state.config_step == 4 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("Multilib (32-bit): {}", app_state.config_values[5]))
+            .style(if app_state.config_step == 5 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("AUR Helper: {}", app_state.config_values[6]))
+            .style(if app_state.config_step == 6 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+    ];
+
+    let config_list = List::new(config_items)
+        .block(Block::default().title("Configuration Options").borders(Borders::ALL));
+    f.render_widget(config_list, chunks[2]);
+
+    // Instructions
+    let instructions = "Use ↑↓ to navigate, ←→ to change values, 's' to start installation, 'q' to quit";
+    let instruction_text = Paragraph::new(instructions)
+        .block(Block::default().borders(Borders::NONE))
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::Yellow));
+    f.render_widget(instruction_text, chunks[3]);
+}
+
+fn render_installation_ui(f: &mut Frame, app_state: &InstallerState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -360,7 +459,7 @@ fn ui(f: &mut Frame, app_state: &InstallerState) {
             Constraint::Min(5),     // Installer output (minimum 5 lines)
             Constraint::Length(3),  // Instructions
         ])
-        .split(size);
+        .split(f.size());
 
     // Header with ASCII art
     render_header(f, chunks[0]);
@@ -535,11 +634,13 @@ fn render_config(f: &mut Frame, area: Rect, app_state: &InstallerState) {
     }
     
     let config_items = vec![
-        ListItem::new(format!("Disk: {}", app_state.disk)),
-        ListItem::new(format!("Strategy: {}", app_state.strategy)),
-        ListItem::new(format!("Boot Mode: {}", app_state.boot_mode)),
-        ListItem::new(format!("Desktop: {}", app_state.desktop)),
-        ListItem::new(format!("Username: {}", app_state.username)),
+        ListItem::new(format!("Partitioning: {}", app_state.config_values[0])),
+        ListItem::new(format!("Desktop: {}", app_state.config_values[1])),
+        ListItem::new(format!("Username: {}", app_state.config_values[2])),
+        ListItem::new(format!("Hostname: {}", app_state.config_values[3])),
+        ListItem::new(format!("Encryption: {}", app_state.config_values[4])),
+        ListItem::new(format!("Multilib: {}", app_state.config_values[5])),
+        ListItem::new(format!("AUR Helper: {}", app_state.config_values[6])),
     ];
 
     let config_list = List::new(config_items)
@@ -597,4 +698,11 @@ fn render_instructions(f: &mut Frame, area: Rect, app_state: &InstallerState) {
         .style(Style::default().fg(color));
 
     f.render_widget(instruction_text, area);
+}
+
+fn restore_terminal() -> Result<(), Box<dyn std::error::Error>> {
+    // Restore terminal state
+    crossterm::terminal::disable_raw_mode()?;
+    crossterm::execute!(stdout(), crossterm::terminal::LeaveAlternateScreen)?;
+    Ok(())
 }
