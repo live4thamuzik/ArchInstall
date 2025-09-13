@@ -198,6 +198,26 @@ main() {
     log_info "  MAIN_USER_PASSWORD: '${MAIN_USER_PASSWORD:+SET}' (length: ${#MAIN_USER_PASSWORD})"
     log_info "  SYSTEM_HOSTNAME: '${SYSTEM_HOSTNAME:-NOT_SET}'"
 
+    # Ensure EFI partition is properly mounted before chroot
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        log_info "Verifying EFI partition is properly mounted before chroot..."
+        if ! mountpoint -q "/mnt/boot/efi"; then
+            log_error "EFI partition not mounted at /mnt/boot/efi. Attempting to remount..."
+            if [ -n "${PARTITION_UUIDS_EFI_UUID:-}" ]; then
+                local efi_dev="/dev/disk/by-uuid/$PARTITION_UUIDS_EFI_UUID"
+                if [ -b "$efi_dev" ]; then
+                    log_info "Remounting EFI partition from UUID: $efi_dev"
+                    mount -t vfat -o rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro "$efi_dev" "/mnt/boot/efi" || error_exit "Failed to remount EFI partition"
+                else
+                    error_exit "EFI partition device not found: $efi_dev"
+                fi
+            else
+                error_exit "EFI partition UUID not available for remounting"
+            fi
+        fi
+        log_info "EFI partition verified and mounted at /mnt/boot/efi"
+    fi
+
     echo "Running chroot config..."
     log_info "Executing chroot configuration script inside chroot..."
     arch-chroot /mnt /bin/bash -c "LOG_FILE=$LOG_FILE MAIN_USERNAME='$MAIN_USERNAME' ROOT_PASSWORD='$ROOT_PASSWORD' MAIN_USER_PASSWORD='$MAIN_USER_PASSWORD' SYSTEM_HOSTNAME='$SYSTEM_HOSTNAME' USERNAME='$MAIN_USERNAME' USER_PASSWORD='$MAIN_USER_PASSWORD' HOSTNAME='$SYSTEM_HOSTNAME' ENCRYPTION_PASSWORD='$LUKS_PASSPHRASE' TIMEZONE='$TIMEZONE' LOCALE='$LOCALE' KEYMAP='$KEYMAP' DESKTOP_ENVIRONMENT='$DESKTOP_ENVIRONMENT' DISPLAY_MANAGER='$DISPLAY_MANAGER' BOOTLOADER_TYPE='$BOOTLOADER_TYPE' BOOT_MODE='$BOOT_MODE' OVERRIDE_BOOT_MODE='$OVERRIDE_BOOT_MODE' WANT_SECURE_BOOT='$WANT_SECURE_BOOT' WANT_AUR_HELPER='$WANT_AUR_HELPER' AUR_HELPER_CHOICE='$AUR_HELPER_CHOICE' WANT_GRUB_THEME='$WANT_GRUB_THEME' GRUB_THEME_CHOICE='$GRUB_THEME_CHOICE' WANT_PLYMOUTH='$WANT_PLYMOUTH' WANT_PLYMOUTH_THEME='$WANT_PLYMOUTH_THEME' PLYMOUTH_THEME_CHOICE='$PLYMOUTH_THEME_CHOICE' WANT_BTRFS='$WANT_BTRFS' WANT_BTRFS_SNAPSHOTS='$WANT_BTRFS_SNAPSHOTS' BTRFS_SNAPSHOT_FREQUENCY='$BTRFS_SNAPSHOT_FREQUENCY' BTRFS_KEEP_SNAPSHOTS='$BTRFS_KEEP_SNAPSHOTS' WANT_ENCRYPTION='$WANT_ENCRYPTION' WANT_LVM='$WANT_LVM' WANT_RAID='$WANT_RAID' RAID_LEVEL='$RAID_LEVEL' ROOT_FILESYSTEM_TYPE='$ROOT_FILESYSTEM_TYPE' HOME_FILESYSTEM_TYPE='$HOME_FILESYSTEM_TYPE' KERNEL_TYPE='$KERNEL_TYPE' CPU_MICROCODE_TYPE='$CPU_MICROCODE_TYPE' TIME_SYNC_CHOICE='$TIME_SYNC_CHOICE' GPU_DRIVER_TYPE='$GPU_DRIVER_TYPE' WANT_MULTILIB='$WANT_MULTILIB' WANT_FLATPAK='$WANT_FLATPAK' INSTALL_CUSTOM_PACKAGES='$INSTALL_CUSTOM_PACKAGES' CUSTOM_PACKAGES='$CUSTOM_PACKAGES' INSTALL_CUSTOM_AUR_PACKAGES='$INSTALL_CUSTOM_AUR_PACKAGES' CUSTOM_AUR_PACKAGES='$CUSTOM_AUR_PACKAGES' WANT_NUMLOCK_ON_BOOT='$WANT_NUMLOCK_ON_BOOT' WANT_DOTFILES_DEPLOYMENT='$WANT_DOTFILES_DEPLOYMENT' DOTFILES_REPO_URL='$DOTFILES_REPO_URL' DOTFILES_BRANCH='$DOTFILES_BRANCH' REFLECTOR_COUNTRY_CODE='$REFLECTOR_COUNTRY_CODE' ENABLE_OS_PROBER='$ENABLE_OS_PROBER' WANT_BTRFS_ASSISTANT='$WANT_BTRFS_ASSISTANT' WANT_SWAP='$WANT_SWAP' WANT_HOME_PARTITION='$WANT_HOME_PARTITION' LUKS_PASSPHRASE='$LUKS_PASSPHRASE' INSTALL_DISK='$INSTALL_DISK' ./chroot_config.sh" || error_exit "Chroot configuration failed."

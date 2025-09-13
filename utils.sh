@@ -951,15 +951,36 @@ install_grub_uefi() {
     
     # Validate EFI directory exists and is mounted
     if [ ! -d "/boot/efi" ]; then
-        error_exit "EFI directory /boot/efi not found. Check EFI partition mounting."
+        log_error "EFI directory /boot/efi not found. Attempting to create it..."
+        mkdir -p "/boot/efi" || error_exit "Failed to create /boot/efi directory"
     fi
     
     if ! mountpoint -q "/boot/efi"; then
-        error_exit "EFI partition not mounted at /boot/efi"
+        log_error "EFI partition not mounted at /boot/efi. Attempting to remount..."
+        
+        # Try to find and remount the EFI partition
+        if [ -n "${PARTITION_UUIDS_EFI_UUID:-}" ]; then
+            local efi_dev="/dev/disk/by-uuid/$PARTITION_UUIDS_EFI_UUID"
+            if [ -b "$efi_dev" ]; then
+                log_info "Remounting EFI partition from UUID: $efi_dev"
+                mount -t vfat -o rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro "$efi_dev" "/boot/efi" || error_exit "Failed to remount EFI partition"
+            else
+                error_exit "EFI partition device not found: $efi_dev"
+            fi
+        else
+            error_exit "EFI partition UUID not available for remounting"
+        fi
     fi
     
-    # Install GRUB to EFI
-    grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=GRUB --recheck || error_exit "GRUB EFI installation failed"
+    # Verify EFI partition is accessible
+    if [ ! -d "/boot/efi/EFI" ]; then
+        log_info "Creating EFI directory structure..."
+        mkdir -p "/boot/efi/EFI" || error_exit "Failed to create EFI directory structure"
+    fi
+    
+    # Install GRUB to EFI - match working approach from previous project (no --efi-directory)
+    log_info "Installing GRUB to EFI partition..."
+    grub-install --target=x86_64-efi --bootloader-id=grub_uefi --recheck || error_exit "GRUB EFI installation failed"
     log_info "GRUB UEFI installation complete."
 }
 
@@ -988,14 +1009,34 @@ install_systemd_bootloader() {
     
     # Validate EFI directory
     if [ ! -d "/boot/efi" ]; then
-        error_exit "EFI directory /boot/efi not found"
+        log_error "EFI directory /boot/efi not found. Attempting to create it..."
+        mkdir -p "/boot/efi" || error_exit "Failed to create /boot/efi directory"
     fi
     
     if ! mountpoint -q "/boot/efi"; then
-        error_exit "EFI partition not mounted at /boot/efi"
+        log_error "EFI partition not mounted at /boot/efi. Attempting to remount..."
+        
+        # Try to find and remount the EFI partition
+        if [ -n "${PARTITION_UUIDS_EFI_UUID:-}" ]; then
+            local efi_dev="/dev/disk/by-uuid/$PARTITION_UUIDS_EFI_UUID"
+            if [ -b "$efi_dev" ]; then
+                log_info "Remounting EFI partition from UUID: $efi_dev"
+                mount -t vfat -o rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro "$efi_dev" "/boot/efi" || error_exit "Failed to remount EFI partition"
+            else
+                error_exit "EFI partition device not found: $efi_dev"
+            fi
+        else
+            error_exit "EFI partition UUID not available for remounting"
+        fi
     fi
     
-    # Install systemd-boot
+    # Verify EFI partition is accessible
+    if [ ! -d "/boot/efi/EFI" ]; then
+        log_info "Creating EFI directory structure..."
+        mkdir -p "/boot/efi/EFI" || error_exit "Failed to create EFI directory structure"
+    fi
+    
+    # Install systemd-boot - match working approach from previous project
     bootctl install || error_exit "systemd-boot installation failed"
     
     # Create boot entry
