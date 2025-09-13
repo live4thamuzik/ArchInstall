@@ -138,16 +138,8 @@ _log_success() { echo -e "\n\e[32;1m============================================
     # --- Phase 2: Bootloader & Initramfs ---
     _log_info "Configuring bootloader, GRUB defaults, theme, and mkinitpio hooks."
     
-    # Install GRUB packages first (creates /etc/default/grub)
-    install_grub_packages_chroot || _log_error "GRUB packages installation failed."
-    
-    # Configure GRUB defaults AFTER packages are installed (required for encryption support)
-    configure_grub_defaults_chroot || _log_error "GRUB default configuration failed."
-    
-    # Install GRUB bootloader (match ArchL4TM approach - simple and direct)
-    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
-        install_grub_simple_chroot || _log_error "GRUB installation failed."
-    fi
+    # Install GRUB (simplified ArchL4TM approach - packages, config, install)
+    install_grub_chroot || _log_error "GRUB installation failed."
 
     # Configure GRUB theme only (final GRUB config after initramfs rebuild)
     if [ "$BOOTLOADER_TYPE" == "grub" ]; then

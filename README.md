@@ -1,4 +1,4 @@
-# 🚀 ArchInstall - Advanced Arch Linux Installer (UNDER CONSTRUCTON - not ready for public use)
+# 🚀 ArchInstall - Advanced Arch Linux Installer
 
 > **A comprehensive, modular, and user-friendly Arch Linux installation script that bridges the gap between manual installation and automated tools. Features Btrfs snapshots, interactive package selection, and superior customization compared to the official archinstall.**
 

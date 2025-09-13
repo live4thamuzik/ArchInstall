@@ -899,56 +899,38 @@ save_current_config() {
 
 # --- Chroot Configuration Functions ---
 
-# Installs GRUB packages only (creates /etc/default/grub)
-# Global: BOOT_MODE, BOOTLOADER_TYPE
-install_grub_packages_chroot() {
-    log_info "Installing GRUB packages..."
-    
-    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
-        # Install GRUB and UEFI dependencies
-        if [ "$BOOT_MODE" == "uefi" ]; then
-            log_info "Installing GRUB UEFI packages and dependencies..."
-            install_packages_chroot "${BASE_PACKAGES_BOOTLOADER_GRUB[@]}" "${BASE_PACKAGES_FILESYSTEM[@]}" || error_exit "Failed to install GRUB UEFI packages"
-        else
-            log_info "Installing GRUB BIOS packages..."
-            install_packages_chroot "grub" || error_exit "Failed to install GRUB package"
-        fi
-    fi
-    log_info "GRUB packages installed successfully."
-}
-
-# Installs GRUB bootloader (after packages and configuration)
-# Global: BOOT_MODE, BOOTLOADER_TYPE
-install_grub_bootloader_chroot() {
-    log_info "Installing GRUB bootloader..."
-    
-    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
-        if [ "$BOOT_MODE" == "uefi" ]; then
-            install_grub_uefi || error_exit "GRUB UEFI installation failed"
-        else
-            install_grub_bios || error_exit "GRUB BIOS installation failed"
-        fi
-        
-        # Generate initial GRUB configuration
-        grub-mkconfig -o /boot/grub/grub.cfg || error_exit "Initial GRUB configuration failed"
-    fi
-    log_info "GRUB bootloader installed successfully."
-}
-
-# Simple GRUB installation matching ArchL4TM approach
-# Global: BOOT_MODE
-install_grub_simple_chroot() {
+# Installs GRUB packages and bootloader (simplified ArchL4TM approach)
+# Global: BOOT_MODE, BOOTLOADER_TYPE, WANT_ENCRYPTION
+install_grub_chroot() {
     log_info "Installing GRUB (ArchL4TM approach)..."
     
+    if [ "$BOOTLOADER_TYPE" != "grub" ]; then
+        log_info "Skipping GRUB installation (not selected)"
+        return 0
+    fi
+    
+    # Install GRUB packages first (creates /etc/default/grub)
     if [ "$BOOT_MODE" == "uefi" ]; then
-        # Match ArchL4TM: simple grub-install without --efi-directory
+        log_info "Installing GRUB UEFI packages and dependencies..."
+        install_packages_chroot "${BASE_PACKAGES_BOOTLOADER_GRUB[@]}" "${BASE_PACKAGES_FILESYSTEM[@]}" || error_exit "Failed to install GRUB UEFI packages"
+    else
+        log_info "Installing GRUB BIOS packages..."
+        install_packages_chroot "grub" || error_exit "Failed to install GRUB package"
+    fi
+    
+    # Configure GRUB defaults (including encryption support)
+    configure_grub_defaults_chroot || error_exit "GRUB configuration failed"
+    
+    # Install GRUB bootloader (ArchL4TM approach)
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        # Simple UEFI installation (no --efi-directory, auto-detection)
         grub-install --target=x86_64-efi --bootloader-id=grub_uefi --recheck || error_exit "GRUB EFI installation failed"
     else
         # BIOS installation
         grub-install --target=i386-pc "$INSTALL_DISK" --recheck || error_exit "GRUB BIOS installation failed"
     fi
     
-    # Generate GRUB configuration (match ArchL4TM)
+    # Generate GRUB configuration
     grub-mkconfig -o /boot/grub/grub.cfg || error_exit "GRUB configuration generation failed"
     
     log_info "GRUB installed successfully."
@@ -979,82 +961,9 @@ configure_bootloader_chroot() {
     log_info "Bootloader configuration complete."
 }
 
-# Installs GRUB bootloader with comprehensive validation
+# Legacy function - redirects to simplified approach
 install_grub_bootloader() {
-    echo "=== PHASE 3: Bootloader Installation ==="
-    log_info "Installing GRUB bootloader..."
-    
-    # Install GRUB and UEFI dependencies
-    if [ "$BOOT_MODE" == "uefi" ]; then
-        log_info "Installing GRUB UEFI packages and dependencies..."
-        install_packages_chroot "${BASE_PACKAGES_BOOTLOADER_GRUB[@]}" "${BASE_PACKAGES_FILESYSTEM[@]}" || error_exit "Failed to install GRUB UEFI packages"
-    else
-        log_info "Installing GRUB BIOS packages..."
-        install_packages_chroot "grub" || error_exit "Failed to install GRUB package"
-    fi
-    
-    if [ "$BOOT_MODE" == "uefi" ]; then
-        install_grub_uefi || error_exit "GRUB UEFI installation failed"
-    else
-        install_grub_bios || error_exit "GRUB BIOS installation failed"
-    fi
-    
-    # Generate initial GRUB configuration
-    grub-mkconfig -o /boot/grub/grub.cfg || error_exit "Initial GRUB configuration failed"
-    log_info "GRUB bootloader installed successfully."
-}
-
-# Installs GRUB for UEFI systems
-install_grub_uefi() {
-    log_info "Installing GRUB for UEFI..."
-    
-    # Validate EFI directory exists and is mounted
-    if [ ! -d "/boot/efi" ]; then
-        log_error "EFI directory /boot/efi not found. Attempting to create it..."
-        mkdir -p "/boot/efi" || error_exit "Failed to create /boot/efi directory"
-    fi
-    
-    if ! mountpoint -q "/boot/efi"; then
-        log_error "EFI partition not mounted at /boot/efi. Attempting to remount..."
-        
-        # Try to find and remount the EFI partition
-        if [ -n "${PARTITION_UUIDS_EFI_UUID:-}" ]; then
-            local efi_dev="/dev/disk/by-uuid/$PARTITION_UUIDS_EFI_UUID"
-            if [ -b "$efi_dev" ]; then
-                log_info "Remounting EFI partition from UUID: $efi_dev"
-                mount -t vfat -o rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro "$efi_dev" "/boot/efi" || error_exit "Failed to remount EFI partition"
-            else
-                error_exit "EFI partition device not found: $efi_dev"
-            fi
-        else
-            error_exit "EFI partition UUID not available for remounting"
-        fi
-    fi
-    
-    # Verify EFI partition is accessible
-    if [ ! -d "/boot/efi/EFI" ]; then
-        log_info "Creating EFI directory structure..."
-        mkdir -p "/boot/efi/EFI" || error_exit "Failed to create EFI directory structure"
-    fi
-    
-    # Install GRUB to EFI - match working approach from previous project (no --efi-directory)
-    log_info "Installing GRUB to EFI partition..."
-    grub-install --target=x86_64-efi --bootloader-id=grub_uefi --recheck || error_exit "GRUB EFI installation failed"
-    log_info "GRUB UEFI installation complete."
-}
-
-# Installs GRUB for BIOS systems
-install_grub_bios() {
-    log_info "Installing GRUB for BIOS..."
-    
-    # Validate install disk exists
-    if [ ! -b "$INSTALL_DISK" ]; then
-        error_exit "Install disk $INSTALL_DISK not found or not a block device"
-    fi
-    
-    # Install GRUB to MBR
-    grub-install --target=i386-pc "$INSTALL_DISK" --recheck || error_exit "GRUB BIOS installation failed"
-    log_info "GRUB BIOS installation complete."
+    install_grub_chroot
 }
 
 # Installs systemd-boot with comprehensive validation
@@ -1405,7 +1314,16 @@ configure_grub_defaults_chroot() {
         # Enable cryptodisk support for encrypted systems (required before grub-install)
         if [ "$WANT_ENCRYPTION" == "yes" ]; then
             log_info "Enabling GRUB cryptodisk support for encrypted system..."
-            edit_file_in_chroot "/etc/default/grub" "s/^#GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=y/"
+            # Try to uncomment existing line first, then add if not found
+            if grep -q "^#GRUB_ENABLE_CRYPTODISK=" "/etc/default/grub"; then
+                edit_file_in_chroot "/etc/default/grub" "s/^#GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=y/"
+            elif grep -q "^GRUB_ENABLE_CRYPTODISK=" "/etc/default/grub"; then
+                edit_file_in_chroot "/etc/default/grub" "s/^GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=y/"
+            else
+                # Add the line if it doesn't exist
+                echo "GRUB_ENABLE_CRYPTODISK=y" >> "/etc/default/grub"
+                log_info "Added GRUB_ENABLE_CRYPTODISK=y to /etc/default/grub"
+            fi
         fi
     fi
     log_info "GRUB defaults configured."
