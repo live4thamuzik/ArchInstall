@@ -899,6 +899,61 @@ save_current_config() {
 
 # --- Chroot Configuration Functions ---
 
+# Installs GRUB packages only (creates /etc/default/grub)
+# Global: BOOT_MODE, BOOTLOADER_TYPE
+install_grub_packages_chroot() {
+    log_info "Installing GRUB packages..."
+    
+    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
+        # Install GRUB and UEFI dependencies
+        if [ "$BOOT_MODE" == "uefi" ]; then
+            log_info "Installing GRUB UEFI packages and dependencies..."
+            install_packages_chroot "${BASE_PACKAGES_BOOTLOADER_GRUB[@]}" "${BASE_PACKAGES_FILESYSTEM[@]}" || error_exit "Failed to install GRUB UEFI packages"
+        else
+            log_info "Installing GRUB BIOS packages..."
+            install_packages_chroot "grub" || error_exit "Failed to install GRUB package"
+        fi
+    fi
+    log_info "GRUB packages installed successfully."
+}
+
+# Installs GRUB bootloader (after packages and configuration)
+# Global: BOOT_MODE, BOOTLOADER_TYPE
+install_grub_bootloader_chroot() {
+    log_info "Installing GRUB bootloader..."
+    
+    if [ "$BOOTLOADER_TYPE" == "grub" ]; then
+        if [ "$BOOT_MODE" == "uefi" ]; then
+            install_grub_uefi || error_exit "GRUB UEFI installation failed"
+        else
+            install_grub_bios || error_exit "GRUB BIOS installation failed"
+        fi
+        
+        # Generate initial GRUB configuration
+        grub-mkconfig -o /boot/grub/grub.cfg || error_exit "Initial GRUB configuration failed"
+    fi
+    log_info "GRUB bootloader installed successfully."
+}
+
+# Simple GRUB installation matching ArchL4TM approach
+# Global: BOOT_MODE
+install_grub_simple_chroot() {
+    log_info "Installing GRUB (ArchL4TM approach)..."
+    
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        # Match ArchL4TM: simple grub-install without --efi-directory
+        grub-install --target=x86_64-efi --bootloader-id=grub_uefi --recheck || error_exit "GRUB EFI installation failed"
+    else
+        # BIOS installation
+        grub-install --target=i386-pc "$INSTALL_DISK" --recheck || error_exit "GRUB BIOS installation failed"
+    fi
+    
+    # Generate GRUB configuration (match ArchL4TM)
+    grub-mkconfig -o /boot/grub/grub.cfg || error_exit "GRUB configuration generation failed"
+    
+    log_info "GRUB installed successfully."
+}
+
 # Configures bootloader installation inside chroot environment.
 # Global: BOOTLOADER_TYPE, BOOT_MODE, INSTALL_DISK, PARTITION_SCHEME
 # Installs GRUB (EFI/BIOS) or systemd-boot based on configuration
