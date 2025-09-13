@@ -929,8 +929,12 @@ install_grub_bootloader() {
     echo "=== PHASE 3: Bootloader Installation ==="
     log_info "Installing GRUB bootloader..."
     
-    # Ensure GRUB package is installed
-    if ! pacman -Qi grub &>/dev/null; then
+    # Install GRUB and UEFI dependencies
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        log_info "Installing GRUB UEFI packages and dependencies..."
+        install_packages_chroot "${BASE_PACKAGES_BOOTLOADER_GRUB[@]}" "${BASE_PACKAGES_FILESYSTEM[@]}" || error_exit "Failed to install GRUB UEFI packages"
+    else
+        log_info "Installing GRUB BIOS packages..."
         install_packages_chroot "grub" || error_exit "Failed to install GRUB package"
     fi
     
