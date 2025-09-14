@@ -12,9 +12,87 @@ use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::thread;
 use std::time::Duration;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use serde::{Deserialize, Serialize};
 
 // Global interrupt flag
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+// Structured communication protocol between TUI and Bash scripts
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum InstallationPhase {
+    Prerequisites,
+    UserInput,
+    DiskPartitioning,
+    PackageInstallation,
+    SystemConfiguration,
+    DesktopEnvironment,
+    Bootloader,
+    Finalization,
+    Complete,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MessageType {
+    Progress,
+    Status,
+    Error,
+    Warning,
+    Info,
+    UserInput,
+    SystemInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProgressUpdate {
+    pub message_type: MessageType,
+    pub phase: InstallationPhase,
+    pub progress: u8, // 0-100
+    pub message: String,
+    pub timestamp: Option<String>,
+}
+
+impl ProgressUpdate {
+    pub fn new(message_type: MessageType, phase: InstallationPhase, progress: u8, message: String) -> Self {
+        Self {
+            message_type,
+            phase,
+            progress,
+            message,
+            timestamp: None,
+        }
+    }
+    
+    pub fn with_timestamp(mut self, timestamp: String) -> Self {
+        self.timestamp = Some(timestamp);
+        self
+    }
+    
+    // Helper functions for common progress updates
+    pub fn progress(phase: InstallationPhase, progress: u8, message: String) -> Self {
+        Self::new(MessageType::Progress, phase, progress, message)
+    }
+    
+    pub fn status(phase: InstallationPhase, message: String) -> Self {
+        Self::new(MessageType::Status, phase, 0, message)
+    }
+    
+    pub fn error(phase: InstallationPhase, message: String) -> Self {
+        Self::new(MessageType::Error, phase, 0, message)
+    }
+    
+    pub fn warning(phase: InstallationPhase, message: String) -> Self {
+        Self::new(MessageType::Warning, phase, 0, message)
+    }
+    
+    pub fn info(phase: InstallationPhase, message: String) -> Self {
+        Self::new(MessageType::Info, phase, 0, message)
+    }
+    
+    // Convert to JSON string for output to stderr
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum PopupType {
@@ -352,7 +430,7 @@ pub enum Focus {
 
 pub struct InstallerState {
     pub current_phase: String,
-    pub progress: u16,
+    pub progress: u8,
     pub status_message: String,
     pub installer_output: Vec<String>,
     pub is_running: bool,
@@ -1309,7 +1387,28 @@ fn parse_installer_output(app_state: &Arc<Mutex<InstallerState>>, line: &str) {
         state.installer_output.remove(0);
     }
     
-    // Parse specific patterns from installer output
+    // Try to parse as structured JSON first
+    if let Ok(progress_update) = serde_json::from_str::<ProgressUpdate>(line) {
+        // Handle structured progress update
+        state.current_phase = format!("{:?}", progress_update.phase);
+        state.progress = progress_update.progress;
+        state.status_message = progress_update.message.clone();
+        
+        // Handle completion
+        if matches!(progress_update.phase, InstallationPhase::Complete) {
+            state.is_complete = true;
+        }
+        
+        // Handle errors
+        if matches!(progress_update.message_type, MessageType::Error) {
+            state.status_message = format!("ERROR: {}", progress_update.message);
+        }
+        
+        return;
+    }
+    
+    // Fallback to legacy string parsing for backward compatibility
+    // This will be removed once all Bash scripts are updated
     if line.contains("=== PHASE 0: Gathering Installation Details ===") {
         state.current_phase = "Gathering Installation Details".to_string();
         state.progress = 10;
@@ -1612,7 +1711,7 @@ fn render_minimal_ui(f: &mut Frame, app_state: &mut InstallerState) {
     let progress = Gauge::default()
         .block(Block::default().title(format!("{} - {}%", app_state.current_phase, app_state.progress)))
         .gauge_style(Style::default().fg(Color::Cyan))
-        .percent(app_state.progress);
+        .percent(app_state.progress.into());
     f.render_widget(progress, chunks[1]);
 
     // Status
@@ -1705,7 +1804,7 @@ fn render_progress(f: &mut Frame, area: Rect, app_state: &mut InstallerState) {
     let progress = Gauge::default()
         .block(Block::default().title(title).borders(Borders::ALL))
         .gauge_style(Style::default().fg(Color::Cyan))
-        .percent(app_state.progress);
+        .percent(app_state.progress.into());
 
     f.render_widget(progress, area);
 }
