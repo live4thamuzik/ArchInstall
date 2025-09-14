@@ -29,9 +29,11 @@ main() {
 
     # Stage 1: Gather User Input (Always interactive now, no config loading)
     echo "=== PHASE 0: Gathering Installation Details ==="
+    tui_progress_update "UserInput" "10" "Gathering installation details..."
     log_header "Stage 1: Gathering Installation Details"
     gather_installation_details || error_exit "Installation details gathering failed."
     display_summary_and_confirm || error_exit "Installation cancelled by user."
+    tui_progress_update "UserInput" "20" "User input completed"
     
     # Verify the boot mode (UEFI bitness check) - after user input but before disk partitioning
     log_info "Verifying boot mode and UEFI bitness..."
@@ -46,14 +48,18 @@ main() {
 
     # Stage 2: Disk Partitioning and Formatting
     echo "=== PHASE 1: Disk Partitioning ==="
+    tui_progress_update "DiskPartitioning" "30" "Starting disk partitioning..."
     log_header "Stage 2: Disk Partitioning and Formatting"
     execute_disk_strategy || error_exit "Disk partitioning and formatting failed."
+    tui_progress_update "DiskPartitioning" "40" "Disk partitioning completed"
     echo "Disk partitioning complete"
 
     # Stage 3: Base System Installation
     echo "=== PHASE 2: Base Installation ==="
+    tui_progress_update "PackageInstallation" "50" "Installing base system packages..."
     log_header "Stage 3: Installing Base System"
     install_base_system_target || error_exit "Base system installation failed."
+    tui_progress_update "PackageInstallation" "60" "Base system installation completed"
     
     # Generate fstab
     echo "Generating fstab..."
@@ -63,6 +69,7 @@ main() {
 
     # Stage 4: Chroot Configuration
     echo "=== PHASE 4: System Configuration ==="
+    tui_progress_update "SystemConfiguration" "70" "Starting system configuration..."
     log_header "Stage 4: Post-Installation (Chroot) Configuration"
 
     log_info "Copying chroot configuration files to /mnt..."
@@ -228,8 +235,10 @@ main() {
     
     # Stage 5: Finalization
     echo "=== PHASE 5: Finalization ==="
+    tui_progress_update "Finalization" "90" "Finalizing installation..."
     log_header "Stage 5: Finalizing Installation"
     final_cleanup || error_exit "Final cleanup failed."
+    tui_progress_update "Complete" "100" "Installation completed successfully!"
 
     echo "Installation completed successfully!"
     log_success "Arch Linux installation complete! You can now reboot."

@@ -9,6 +9,59 @@ readonly C_HEADER='\e[36;1m'
 readonly C_SUCCESS='\e[32;1m'
 readonly C_RESET='\e[0m'
 
+# Structured progress communication for TUI
+# Outputs JSON progress updates to stderr for TUI parsing
+tui_progress() {
+    local message_type="$1"    # Progress, Status, Error, Warning, Info
+    local phase="$2"           # Prerequisites, UserInput, DiskPartitioning, etc.
+    local progress="$3"        # 0-100
+    local message="$4"         # Human readable message
+    
+    local timestamp
+    timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+    
+    # Create JSON structure
+    local json_output="{\"message_type\":\"$message_type\",\"phase\":\"$phase\",\"progress\":$progress,\"message\":\"$message\",\"timestamp\":\"$timestamp\"}"
+    
+    # Output to stderr (TUI reads this)
+    echo "$json_output" >&2
+    
+    # Also log normally for debugging
+    log_message "INFO" "TUI Progress: $phase ($progress%) - $message"
+}
+
+# Helper functions for common progress updates
+tui_progress_update() {
+    local phase="$1"
+    local progress="$2"
+    local message="$3"
+    tui_progress "Progress" "$phase" "$progress" "$message"
+}
+
+tui_status() {
+    local phase="$1"
+    local message="$2"
+    tui_progress "Status" "$phase" "0" "$message"
+}
+
+tui_error() {
+    local phase="$1"
+    local message="$2"
+    tui_progress "Error" "$phase" "0" "$message"
+}
+
+tui_warning() {
+    local phase="$1"
+    local message="$2"
+    tui_progress "Warning" "$phase" "0" "$message"
+}
+
+tui_info() {
+    local phase="$1"
+    local message="$2"
+    tui_progress "Info" "$phase" "0" "$message"
+}
+
 # Enhanced logging system
 log_message() {
     local level="$1"

@@ -76,6 +76,7 @@ _log_success() { echo -e "\n\e[32;1m============================================
 # Global: All configuration variables exported from install_arch.sh
 # Begin chroot configuration (no wrapper function)
     echo "=== PHASE 4: System Configuration ==="
+    tui_progress_update "SystemConfiguration" "75" "Configuring system settings..."
     _log_info "Starting chroot configuration."
     
     # Verify essential variables are present (concise)
@@ -175,6 +176,7 @@ _log_success() { echo -e "\n\e[32;1m============================================
 
 
     # --- Phase 3: Desktop Environment & Drivers ---
+    tui_progress_update "DesktopEnvironment" "80" "Installing desktop environment: $DESKTOP_ENVIRONMENT..."
     _log_info "Installing Desktop Environment: $DESKTOP_ENVIRONMENT..."
     case "$DESKTOP_ENVIRONMENT" in
         "gnome") install_packages_chroot "${DESKTOP_ENVIRONMENTS_GNOME_PACKAGES[@]}" || _log_error "Desktop Environment packages installation failed." ;;
@@ -182,6 +184,7 @@ _log_success() { echo -e "\n\e[32;1m============================================
         "hyprland") install_packages_chroot "${DESKTOP_ENVIRONMENTS_HYPRLAND_PACKAGES[@]}" || _log_error "Desktop Environment packages installation failed." ;;
         "none") _log_info "No desktop environment to install" ;;
     esac
+    tui_progress_update "DesktopEnvironment" "85" "Desktop environment installation completed"
 
     _log_info "Installing Display Manager: $DISPLAY_MANAGER..."
     case "$DISPLAY_MANAGER" in
