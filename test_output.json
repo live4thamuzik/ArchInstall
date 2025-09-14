@@ -1,7 +1,0 @@
-{"message_type":"Progress","phase":"Prerequisites","progress":10,"message":"Checking system requirements...","timestamp":"2025-09-14 00:15:31"}
-{"message_type":"Progress","phase":"UserInput","progress":25,"message":"Gathering user preferences...","timestamp":"2025-09-14 00:15:32"}
-{"message_type":"Progress","phase":"DiskPartitioning","progress":40,"message":"Partitioning disk...","timestamp":"2025-09-14 00:15:33"}
-{"message_type":"Progress","phase":"PackageInstallation","progress":60,"message":"Installing base packages...","timestamp":"2025-09-14 00:15:34"}
-{"message_type":"Progress","phase":"SystemConfiguration","progress":80,"message":"Configuring system...","timestamp":"2025-09-14 00:15:35"}
-{"message_type":"Progress","phase":"DesktopEnvironment","progress":90,"message":"Installing desktop environment...","timestamp":"2025-09-14 00:15:36"}
-{"message_type":"Progress","phase":"Complete","progress":100,"message":"Installation completed successfully!","timestamp":"2025-09-14 00:15:37"}
