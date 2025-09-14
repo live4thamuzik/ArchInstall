@@ -26,6 +26,7 @@ pub enum InstallationPhase {
     PackageInstallation,
     SystemConfiguration,
     DesktopEnvironment,
+    DisplayManager,
     Bootloader,
     Finalization,
     Complete,
@@ -111,6 +112,7 @@ pub enum PopupType {
     GRUBTheme,
     GPUDrivers,
     Plymouth,
+    PlymouthTheme,
     ManualPartitioning,
     PackageSelection, // Simple bash session for package selection
     TextInput(String), // Field name
@@ -481,6 +483,7 @@ impl Default for InstallerState {
                 String::new(),  // Disk
                 String::new(),  // Partitioning strategy
                 String::new(),  // Desktop environment
+                String::new(),  // Display manager
                 String::new(),  // Encryption
                 String::new(),  // Multilib
                 String::new(),  // AUR helper
@@ -492,6 +495,7 @@ impl Default for InstallerState {
                 String::new(),  // GRUB theme
                 String::new(),  // GPU drivers
                 String::new(),  // Plymouth
+                String::new(),  // Plymouth theme
                 String::new(),  // Pacman packages
                 String::new(),  // AUR packages
             ],
@@ -620,6 +624,12 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                         state: crossterm::event::KeyEventState::NONE 
                                     };
                                     if float.handle_key_event(&key_event) {
+                                        // Floating window is finished, save packages if any were selected
+                                        let config_step = state.config_step;
+                                        if config_step == 20 || config_step == 21 {
+                                            // This is a package selection step, set a placeholder
+                                            state.config_values[config_step] = "packages selected".to_string();
+                                        }
                                         state.focus = Focus::Configuration;
                                     }
                                 }
@@ -654,7 +664,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                         if float_result {
                                             // Floating window is finished, save packages if any were selected
                                             let config_step = state.config_step;
-                                            if config_step == 18 || config_step == 19 {
+                                            if config_step == 20 || config_step == 21 {
                                                 // This is a package selection step, set a placeholder
                                                 state.config_values[config_step] = "packages selected".to_string();
                                             }
@@ -753,6 +763,18 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                                 
                                                 // Note: In a real implementation, you would spawn the CLI tool here
                                                 // For now, we'll just set the value and continue
+                                            } else if matches!(state.popup.popup_type, PopupType::DesktopEnvironment) {
+                                                // Store desktop environment and auto-select display manager
+                                                state.config_values[current_step] = selected_value.clone();
+                                                
+                                                // Auto-select display manager based on DE
+                                                let display_manager = match selected_value.as_str() {
+                                                    "gnome" => "gdm",
+                                                    "kde" => "sddm", 
+                                                    "hyprland" => "sddm",
+                                                    _ => "sddm", // Default fallback
+                                                };
+                                                state.config_values[7] = display_manager.to_string();
                                             } else if matches!(state.popup.popup_type, PopupType::TimezoneRegion) {
                                                 // Store timezone region and move to timezone city selection
                                                 state.config_values[current_step] = selected_value;
@@ -775,7 +797,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                                 state.editing_field = None;
                                                 state.current_input.clear();
                                             }
-                                        } else if state.config_step == 20 {
+                                        } else if state.config_step == 22 {
                                             // Start button pressed - begin installation
                                             state.is_configuring = false;
                                             state.is_running = true;
@@ -805,11 +827,12 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                                         }
                                                     },
                                                     6 => PopupType::DesktopEnvironment,
-                                                    7 => {
+                                                    7 => PopupType::None, // Display Manager - auto-selected, no popup
+                                                    8 => {
                                                         // Only show encryption if not auto_luks_lvm (which includes encryption)
                                                         if state.config_values[5] == "auto_luks_lvm" {
                                                             // Auto-set encryption to yes for auto_luks_lvm
-                                                            state.config_values[7] = "yes".to_string();
+                                                            state.config_values[8] = "yes".to_string();
                                                             // Move to next step automatically
                                                             state.config_step += 1;
                                                             PopupType::None
@@ -817,36 +840,37 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                                             PopupType::Encryption
                                                         }
                                                     },
-                                                    8 => PopupType::Multilib,
-                                                    9 => PopupType::AURHelper,
-                                                    10 => PopupType::TimezoneRegion,
-                                                    11 => {
+                                                    9 => PopupType::Multilib,
+                                                    10 => PopupType::AURHelper,
+                                                    11 => PopupType::TimezoneRegion,
+                                                    12 => {
                                                         // Only show timezone cities if region is selected
-                                                        if !state.config_values[10].is_empty() {
+                                                        if !state.config_values[11].is_empty() {
                                                             PopupType::Timezone
                                                         } else {
                                                             PopupType::None
                                                         }
                                                     },
-                                                    12 => PopupType::Locale,
-                                                    13 => PopupType::Keymap,
-                                                    14 => PopupType::Bootloader,
-                                                    15 => PopupType::GRUBTheme,
-                                                    16 => PopupType::GPUDrivers,
-                                                    17 => PopupType::Plymouth,
-                                                    18 => PopupType::PackageSelection, // Pacman packages
-                                                    19 => PopupType::PackageSelection, // AUR packages
+                                                    13 => PopupType::Locale,
+                                                    14 => PopupType::Keymap,
+                                                    15 => PopupType::Bootloader,
+                                                    16 => PopupType::GRUBTheme,
+                                                    17 => PopupType::GPUDrivers,
+                                                    18 => PopupType::Plymouth,
+                                                    19 => PopupType::PlymouthTheme,
+                                                    20 => PopupType::PackageSelection, // Pacman packages
+                                                    21 => PopupType::PackageSelection, // AUR packages
                                                     _ => PopupType::None,
                                                 };
                                                 
                                                 if !matches!(popup_type, PopupType::None) {
                                                     let (options, title) = if matches!(popup_type, PopupType::Timezone) {
                                                         // Special handling for timezone - get timezones for selected region
-                                                        let region = state.config_values[10].clone();
+                                                        let region = state.config_values[11].clone();
                                                         (detect_timezones_for_region(&region), "Select Timezone".to_string())
                                                     } else if matches!(popup_type, PopupType::PackageSelection) {
                                                         // Create floating window for package selection
-                                                        let is_pacman = state.config_step == 18;
+                                                        let is_pacman = state.config_step == 20; // Pacman packages
                                                         let package_selection = PackageSelection::new(is_pacman);
                                                         state.focus = Focus::FloatingWindow(Float::new(Box::new(package_selection), 80, 60));
                                                         (vec![], "Interactive Package Selection".to_string())
@@ -879,6 +903,12 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                             state: crossterm::event::KeyEventState::NONE 
                                         };
                                         if float.handle_key_event(&key_event) {
+                                            // Floating window is finished, save packages if any were selected
+                                            let config_step = state.config_step;
+                                            if config_step == 20 || config_step == 21 {
+                                                // This is a package selection step, set a placeholder
+                                                state.config_values[config_step] = "packages selected".to_string();
+                                            }
                                             state.focus = Focus::Configuration;
                                         }
                                     }
@@ -928,7 +958,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                         state.config_step -= 1;
                                     } else if state.config_step == 0 {
                                         // Wrap around to start button
-                                        state.config_step = 20;
+                                        state.config_step = 22;
                                     }
                                 }
                             }
@@ -944,9 +974,9 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                 } else {
                                     // Navigate configuration options
-                                    if state.config_step < 20 {
+                                    if state.config_step < 22 {
                                         state.config_step += 1;
-                                    } else if state.config_step == 20 {
+                                    } else if state.config_step == 22 {
                                         // Wrap around to first option
                                         state.config_step = 0;
                                     }
@@ -1280,6 +1310,13 @@ fn get_popup_options(popup_type: &PopupType) -> (Vec<String>, String) {
                 "no".to_string(),
             ],
             "Enable Plymouth Boot Splash".to_string()
+        ),
+        PopupType::PlymouthTheme => (
+            vec![
+                "arch-glow".to_string(),
+                "arch-mac-style".to_string(),
+            ],
+            "Select Plymouth Theme".to_string()
         ),
         PopupType::ManualPartitioning => (
             vec![
@@ -1708,42 +1745,46 @@ fn render_configuration_ui(f: &mut Frame, app_state: &mut InstallerState) {
             .style(if app_state.config_step == 5 { Style::default().fg(Color::Yellow) } else { Style::default() }),
         ListItem::new(format!("Desktop Environment: {}", if app_state.config_values[6].is_empty() { "[Press Enter]" } else { &app_state.config_values[6] }))
             .style(if app_state.config_step == 6 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Encryption: {}", if app_state.config_values[7].is_empty() { "[Press Enter]" } else { &app_state.config_values[7] }))
+        ListItem::new(format!("Display Manager: {}", if app_state.config_values[7].is_empty() { "[Auto-selected]" } else { &app_state.config_values[7] }))
             .style(if app_state.config_step == 7 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Multilib (32-bit): {}", if app_state.config_values[8].is_empty() { "[Press Enter]" } else { &app_state.config_values[8] }))
+        ListItem::new(format!("Encryption: {}", if app_state.config_values[8].is_empty() { "[Press Enter]" } else { &app_state.config_values[8] }))
             .style(if app_state.config_step == 8 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("AUR Helper: {}", if app_state.config_values[9].is_empty() { "[Press Enter]" } else { &app_state.config_values[9] }))
+        ListItem::new(format!("Multilib (32-bit): {}", if app_state.config_values[9].is_empty() { "[Press Enter]" } else { &app_state.config_values[9] }))
             .style(if app_state.config_step == 9 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Timezone Region: {}", if app_state.config_values[10].is_empty() { "[Press Enter]" } else { &app_state.config_values[10] }))
+        ListItem::new(format!("AUR Helper: {}", if app_state.config_values[10].is_empty() { "[Press Enter]" } else { &app_state.config_values[10] }))
             .style(if app_state.config_step == 10 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Timezone: {}", if app_state.config_values[11].is_empty() { "[Press Enter]" } else { &app_state.config_values[11] }))
+        ListItem::new(format!("Timezone Region: {}", if app_state.config_values[11].is_empty() { "[Press Enter]" } else { &app_state.config_values[11] }))
             .style(if app_state.config_step == 11 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Locale: {}", if app_state.config_values[12].is_empty() { "[Press Enter]" } else { &app_state.config_values[12] }))
+        ListItem::new(format!("Timezone: {}", if app_state.config_values[12].is_empty() { "[Press Enter]" } else { &app_state.config_values[12] }))
             .style(if app_state.config_step == 12 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Keymap: {}", if app_state.config_values[13].is_empty() { "[Press Enter]" } else { &app_state.config_values[13] }))
+        ListItem::new(format!("Locale: {}", if app_state.config_values[13].is_empty() { "[Press Enter]" } else { &app_state.config_values[13] }))
             .style(if app_state.config_step == 13 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Bootloader: {}", if app_state.config_values[14].is_empty() { "[Press Enter]" } else { &app_state.config_values[14] }))
+        ListItem::new(format!("Keymap: {}", if app_state.config_values[14].is_empty() { "[Press Enter]" } else { &app_state.config_values[14] }))
             .style(if app_state.config_step == 14 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("GRUB Theme: {}", if app_state.config_values[15].is_empty() { "[Press Enter]" } else { &app_state.config_values[15] }))
+        ListItem::new(format!("Bootloader: {}", if app_state.config_values[15].is_empty() { "[Press Enter]" } else { &app_state.config_values[15] }))
             .style(if app_state.config_step == 15 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("GPU Drivers: {}", if app_state.config_values[16].is_empty() { "[Press Enter]" } else { &app_state.config_values[16] }))
+        ListItem::new(format!("GRUB Theme: {}", if app_state.config_values[16].is_empty() { "[Press Enter]" } else { &app_state.config_values[16] }))
             .style(if app_state.config_step == 16 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Plymouth: {}", if app_state.config_values[17].is_empty() { "[Press Enter]" } else { &app_state.config_values[17] }))
+        ListItem::new(format!("GPU Drivers: {}", if app_state.config_values[17].is_empty() { "[Press Enter]" } else { &app_state.config_values[17] }))
             .style(if app_state.config_step == 17 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Pacman Packages: {}", 
-            if app_state.config_values[18].is_empty() { 
-                "[Press Enter]".to_string() 
-            } else { 
-                app_state.config_values[18].clone() 
-            }))
+        ListItem::new(format!("Plymouth: {}", if app_state.config_values[18].is_empty() { "[Press Enter]" } else { &app_state.config_values[18] }))
             .style(if app_state.config_step == 18 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("AUR Packages: {}", 
-            if app_state.config_values[19].is_empty() { 
+        ListItem::new(format!("Plymouth Theme: {}", if app_state.config_values[19].is_empty() { "[Press Enter]" } else { &app_state.config_values[19] }))
+            .style(if app_state.config_step == 19 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("Pacman Packages: {}", 
+            if app_state.config_values[20].is_empty() { 
                 "[Press Enter]".to_string() 
             } else { 
-                app_state.config_values[19].clone() 
+                app_state.config_values[20].clone() 
             }))
-            .style(if app_state.config_step == 19 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+            .style(if app_state.config_step == 20 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("AUR Packages: {}", 
+            if app_state.config_values[21].is_empty() { 
+                "[Press Enter]".to_string() 
+            } else { 
+                app_state.config_values[21].clone() 
+            }))
+            .style(if app_state.config_step == 21 { Style::default().fg(Color::Yellow) } else { Style::default() }),
     ];
 
     let config_list = List::new(config_items)
@@ -1763,7 +1804,7 @@ fn render_configuration_ui(f: &mut Frame, app_state: &mut InstallerState) {
     f.render_widget(instruction_text, chunks[3]);
 
     // Start button
-    let start_button_text = if app_state.config_step == 20 {
+    let start_button_text = if app_state.config_step == 22 {
         "> START INSTALLATION <"
     } else {
         "  START INSTALLATION  "
@@ -1771,7 +1812,7 @@ fn render_configuration_ui(f: &mut Frame, app_state: &mut InstallerState) {
     let start_button = Paragraph::new(start_button_text)
         .block(Block::default().borders(Borders::ALL))
         .alignment(Alignment::Center)
-        .style(if app_state.config_step == 20 { 
+        .style(if app_state.config_step == 22 { 
             Style::default().fg(Color::Black).bg(Color::Green) 
         } else { 
             Style::default().fg(Color::Green) 
@@ -1972,20 +2013,21 @@ fn render_config(f: &mut Frame, area: Rect, app_state: &mut InstallerState) {
         ListItem::new(format!("Disk: {}", app_state.config_values[4])),
         ListItem::new(format!("Partitioning: {}", app_state.config_values[5])),
         ListItem::new(format!("Desktop: {}", app_state.config_values[6])),
-        ListItem::new(format!("Encryption: {}", app_state.config_values[7])),
-        ListItem::new(format!("Multilib: {}", app_state.config_values[8])),
-        ListItem::new(format!("AUR Helper: {}", app_state.config_values[9])),
-        ListItem::new(format!("Timezone Region: {}", app_state.config_values[10])),
-        ListItem::new(format!("Timezone: {}", app_state.config_values[11])),
-        ListItem::new(format!("Locale: {}", app_state.config_values[12])),
-        ListItem::new(format!("Keymap: {}", app_state.config_values[13])),
-        ListItem::new(format!("Bootloader: {}", app_state.config_values[14])),
-        ListItem::new(format!("GRUB Theme: {}", app_state.config_values[15])),
-        ListItem::new(format!("GPU Drivers: {}", app_state.config_values[16])),
-        ListItem::new(format!("Plymouth: {}", app_state.config_values[17])),
-        ListItem::new(format!("Plymouth Theme: {}", app_state.config_values[18])),
-        ListItem::new(format!("Pacman Packages: {}", app_state.config_values[19])),
-        ListItem::new(format!("AUR Packages: {}", app_state.config_values[20])),
+        ListItem::new(format!("Display Manager: {}", app_state.config_values[7])),
+        ListItem::new(format!("Encryption: {}", app_state.config_values[8])),
+        ListItem::new(format!("Multilib: {}", app_state.config_values[9])),
+        ListItem::new(format!("AUR Helper: {}", app_state.config_values[10])),
+        ListItem::new(format!("Timezone Region: {}", app_state.config_values[11])),
+        ListItem::new(format!("Timezone: {}", app_state.config_values[12])),
+        ListItem::new(format!("Locale: {}", app_state.config_values[13])),
+        ListItem::new(format!("Keymap: {}", app_state.config_values[14])),
+        ListItem::new(format!("Bootloader: {}", app_state.config_values[15])),
+        ListItem::new(format!("GRUB Theme: {}", app_state.config_values[16])),
+        ListItem::new(format!("GPU Drivers: {}", app_state.config_values[17])),
+        ListItem::new(format!("Plymouth: {}", app_state.config_values[18])),
+        ListItem::new(format!("Plymouth Theme: {}", app_state.config_values[19])),
+        ListItem::new(format!("Pacman Packages: {}", app_state.config_values[20])),
+        ListItem::new(format!("AUR Packages: {}", app_state.config_values[21])),
     ];
 
     let config_list = List::new(config_items)
