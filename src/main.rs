@@ -229,8 +229,8 @@ impl PackageSelection {
             "done - Finish package selection".to_string(),
             "".to_string(),
             "Examples:".to_string(),
-            "search fastfetch".to_string(),
-            "add fastfetch neofetch htop".to_string(),
+            "search neofetch".to_string(),
+            "add neofetch".to_string(),
             "".to_string(),
         ];
         
@@ -756,7 +756,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                                 "done" => {
                                                     // Save package list and close popup
                                                     let current_step = state.config_step;
-                                                    state.config_values[current_step] = "fastfetch neofetch htop".to_string(); // Placeholder
+                                                    state.config_values[current_step] = "packages selected".to_string(); // Placeholder
                                                     state.popup.is_active = false;
                                                     state.popup.popup_type = PopupType::None;
                                                     state.current_input.clear();
@@ -2075,8 +2075,8 @@ fn render_config(f: &mut Frame, area: Rect, app_state: &mut InstallerState) {
         ListItem::new(format!("GPU Drivers: {}", app_state.config_values[17])),
         ListItem::new(format!("Plymouth: {}", app_state.config_values[18])),
         ListItem::new(format!("Plymouth Theme: {}", app_state.config_values[19])),
-        ListItem::new(format!("Pacman Packages: {}", app_state.config_values[20])),
-        ListItem::new(format!("AUR Packages: {}", app_state.config_values[21])),
+        ListItem::new(format!("Pacman Packages: {}", if app_state.config_values[20].is_empty() { "[Press Enter]" } else { &app_state.config_values[20] })),
+        ListItem::new(format!("AUR Packages: {}", if app_state.config_values[21].is_empty() { "[Press Enter]" } else { &app_state.config_values[21] })),
     ];
 
     let config_list = List::new(config_items)
