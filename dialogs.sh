@@ -74,7 +74,10 @@ get_available_disks() {
     while IFS= read -r line; do
         disks+=("/dev/$line")
     done < <(lsblk -dno NAME,TYPE | awk '$2=="disk"{print $1}' | grep -v 'loop' | grep -v 'ram')
-    echo "${disks[@]}"
+    # Output each disk on a separate line for proper parsing
+    for disk in "${disks[@]}"; do
+        echo "$disk"
+    done
 }
 
 get_timezones_in_region() {
@@ -86,7 +89,10 @@ get_timezones_in_region() {
     # Special case for US regional timezones
     if [ "$region" == "US" ]; then
         timezones=("US/Eastern" "US/Central" "US/Mountain" "US/Pacific" "US/Alaska" "US/Hawaii")
-        echo "${timezones[@]}"
+        # Output each timezone on a separate line for proper parsing
+        for tz in "${timezones[@]}"; do
+            echo "$tz"
+        done
         return 0
     fi
 
@@ -108,7 +114,10 @@ get_timezones_in_region() {
 
     IFS=$'\n' timezones=($(sort <<<"${timezones[*]}"))
     unset IFS
-    echo "${timezones[@]}"
+    # Output each timezone on a separate line for proper parsing
+    for tz in "${timezones[@]}"; do
+        echo "$tz"
+    done
 }
 
 # Specialized timezone selection with pagination for long lists
