@@ -331,10 +331,27 @@ impl FloatContent for PackageSelection {
                             if parts.len() > 1 {
                                 let term = parts[1..].join(" ");
                                 self.output_lines.push(format!("Searching for '{}'...", term));
-                                self.output_lines.push(format!("Found packages matching '{}':", term));
-                                self.output_lines.push(format!("  {}-1.0-1 (Package 1)", term));
-                                self.output_lines.push(format!("  {}-2.0-1 (Package 2)", term));
-                                self.output_lines.push(format!("  {}-3.0-1 (Package 3)", term));
+                                
+                                // Use the appropriate Bash function based on package type
+                                let function_name = if self.is_pacman { "search_packages" } else { "search_aur_packages" };
+                                match call_bash_function("./dialogs.sh", function_name, &[&term]) {
+                                    Ok(results) => {
+                                        if results.is_empty() {
+                                            self.output_lines.push(format!("No packages found matching: {}", term));
+                                        } else {
+                                            for result in results {
+                                                self.output_lines.push(result);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        self.output_lines.push(format!("Search failed: {}", e));
+                                        // Fallback to mock results if Bash function fails
+                                        self.output_lines.push(format!("Found packages matching '{}':", term));
+                                        self.output_lines.push(format!("  {}-1.0-1 (Package 1)", term));
+                                        self.output_lines.push(format!("  {}-2.0-1 (Package 2)", term));
+                                    }
+                                }
                             } else {
                                 self.output_lines.push("Usage: search <term>".to_string());
                             }
@@ -970,10 +987,55 @@ fn is_text_input_field(step: usize) -> bool {
     }
 }
 
-fn detect_disks() -> Vec<String> {
-    let mut disks = Vec::new();
+// Helper function to call Bash functions and get their output
+fn call_bash_function(script_path: &str, function_name: &str, args: &[&str]) -> Result<Vec<String>, String> {
+    let mut cmd = Command::new("bash");
+    cmd.arg("-c");
     
-    // Try to get disk list from lsblk
+    // Build the command to source the script and call the function
+    let bash_cmd = format!("source '{}' && {} {}", script_path, function_name, args.join(" "));
+    cmd.arg(&bash_cmd);
+    
+    match cmd.output() {
+        Ok(output) => {
+            if output.status.success() {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                let lines: Vec<String> = output_str.lines()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                Ok(lines)
+            } else {
+                let error_str = String::from_utf8_lossy(&output.stderr);
+                Err(format!("Bash function failed: {}", error_str))
+            }
+        }
+        Err(e) => Err(format!("Failed to execute bash command: {}", e))
+    }
+}
+
+fn detect_disks() -> Vec<String> {
+    // Try to use the Bash function first (more robust filtering)
+    if let Ok(disks) = call_bash_function("./dialogs.sh", "get_available_disks", &[]) {
+        if !disks.is_empty() {
+            // Get disk sizes and format them nicely
+            let mut formatted_disks = Vec::new();
+            for disk in disks {
+                if let Ok(size_output) = Command::new("lsblk")
+                    .args(&["-d", "-n", "-o", "SIZE", &disk])
+                    .output() {
+                    let size_str = String::from_utf8_lossy(&size_output.stdout).trim().to_string();
+                    formatted_disks.push(format!("{} ({})", disk, size_str));
+                } else {
+                    formatted_disks.push(disk);
+                }
+            }
+            return formatted_disks;
+        }
+    }
+    
+    // Fallback to direct lsblk call
+    let mut disks = Vec::new();
     if let Ok(output) = Command::new("lsblk")
         .args(&["-d", "-n", "-o", "NAME,SIZE,TYPE"])
         .output() {
@@ -988,7 +1050,7 @@ fn detect_disks() -> Vec<String> {
         }
     }
     
-    // Fallback to common disk paths if lsblk fails
+    // Final fallback to common disk paths if everything fails
     if disks.is_empty() {
         let common_disks = vec![
             "/dev/sda", "/dev/sdb", "/dev/sdc", "/dev/sdd",
@@ -1008,9 +1070,15 @@ fn detect_disks() -> Vec<String> {
 
 
 fn detect_timezones_for_region(region: &str) -> Vec<String> {
-    let mut timezones = Vec::new();
+    // Try to use the Bash function first (more robust)
+    if let Ok(timezones) = call_bash_function("./dialogs.sh", "get_timezones_in_region", &[region]) {
+        if !timezones.is_empty() {
+            return timezones;
+        }
+    }
     
-    // Try to get timezone list from timedatectl for specific region
+    // Fallback to direct timedatectl call
+    let mut timezones = Vec::new();
     if let Ok(output) = Command::new("timedatectl")
         .args(&["list-timezones"])
         .output() {
@@ -1023,7 +1091,7 @@ fn detect_timezones_for_region(region: &str) -> Vec<String> {
         }
     }
     
-    // Fallback to common timezones for specific regions if timedatectl fails
+    // Final fallback to common timezones for specific regions if everything fails
     if timezones.is_empty() {
         timezones = match region {
             "US" => vec![
@@ -1063,6 +1131,36 @@ fn detect_timezones_for_region(region: &str) -> Vec<String> {
     }
     
     timezones
+}
+
+// Update app state from parsed JSON progress update
+fn update_app_state_from_progress(app_state: &Arc<Mutex<InstallerState>>, progress_update: &ProgressUpdate) {
+    let mut state = app_state.lock().unwrap();
+    
+    // Update progress and phase based on the JSON data
+    state.progress = progress_update.progress;
+    state.current_phase = format!("{:?}", progress_update.phase);
+    state.status_message = progress_update.message.clone();
+    
+    // Add the progress message to output log
+    let log_message = format!("[{}] {}: {} ({}%)", 
+        progress_update.timestamp.as_ref().unwrap_or(&"".to_string()),
+        format!("{:?}", progress_update.message_type),
+        progress_update.message,
+        progress_update.progress
+    );
+    state.installer_output.push(log_message);
+    
+    // Keep output log manageable
+    if state.installer_output.len() > 50 {
+        state.installer_output.remove(0);
+    }
+    
+    // Handle completion
+    if matches!(progress_update.phase, InstallationPhase::Complete) {
+        state.is_complete = true;
+        state.progress = 100;
+    }
 }
 
 fn get_popup_options(popup_type: &PopupType) -> (Vec<String>, String) {
@@ -1318,8 +1416,7 @@ fn start_installer_with_config(app_state: Arc<Mutex<InstallerState>>, config_val
 }
 
 fn run_actual_installer(app_state: Arc<Mutex<InstallerState>>, _config_values: Vec<String>) {
-    // For now, let's run the installer in bash-only mode to avoid the interactive issues
-    // The TUI will show progress but the actual installation will be handled by the bash script
+    // Run the installer and capture both stdout and stderr
     let mut child = Command::new("bash")
         .arg("./launch_tui_installer.sh")
         .arg("--bash-only")
@@ -1328,31 +1425,60 @@ fn run_actual_installer(app_state: Arc<Mutex<InstallerState>>, _config_values: V
         .spawn()
         .expect("Failed to start installer");
 
-    // Read stdout and parse for progress updates
+    // Clone app_state for stderr thread
+    let stderr_app_state = app_state.clone();
+    
+    // Handle stderr in a separate thread (this contains JSON progress updates)
+    let stderr_handle = if let Some(stderr) = child.stderr.take() {
+        Some(thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    // Try to parse as JSON progress update first
+                    if let Ok(progress_update) = serde_json::from_str::<ProgressUpdate>(&line) {
+                        // Update app state with parsed progress
+                        update_app_state_from_progress(&stderr_app_state, &progress_update);
+                    } else {
+                        // If not JSON, treat as regular output/error
+                        let mut state = stderr_app_state.lock().unwrap();
+                        state.installer_output.push(line.clone());
+                        if state.installer_output.len() > 50 {
+                            state.installer_output.remove(0);
+                        }
+                        
+                        // Check if it looks like an error
+                        if line.to_lowercase().contains("error") || line.to_lowercase().contains("failed") {
+                            state.status_message = format!("Error: {}", line);
+                        }
+                    }
+                }
+            }
+        }))
+    } else {
+        None
+    };
+
+    // Handle stdout for general output
     if let Some(stdout) = child.stdout.take() {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(line) = line {
-                // Parse the line for progress information
+                // Add stdout to output log
+                let mut state = app_state.lock().unwrap();
+                state.installer_output.push(line.clone());
+                if state.installer_output.len() > 50 {
+                    state.installer_output.remove(0);
+                }
+                
+                // Also try to parse for any fallback progress indicators
                 parse_installer_output(&app_state, &line);
             }
         }
     }
-
-    // Read stderr for error messages
-    if let Some(stderr) = child.stderr.take() {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                // Add error messages to output and update status
-                let mut state = app_state.lock().unwrap();
-                state.installer_output.push(format!("ERROR: {}", line));
-                if state.installer_output.len() > 50 {
-                    state.installer_output.remove(0);
-                }
-                state.status_message = format!("Error: {}", line);
-            }
-        }
+    
+    // Wait for stderr thread to complete
+    if let Some(handle) = stderr_handle {
+        let _ = handle.join();
     }
 
     // Wait for the process to complete
