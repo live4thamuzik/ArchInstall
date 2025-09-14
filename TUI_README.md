@@ -18,30 +18,43 @@ A modern, professional Terminal User Interface (TUI) for the Arch Linux Installe
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  ╔═══════════════════════════════════════════════════╗  │
-│  ║                                                   ║  │
-│  ║    █████╗ ██████╗  ██████╗██╗  ██╗    ██╗     ██╗██╗  ██╗██╗   ██╗ ║  │
-│  ║   ██╔══██╗██╔══██╗██╔════╝██║  ██║    ██║     ██║██║ ██╔╝██║   ██║ ║  │
-│  ║   ███████║██████╔╝██║     ███████║    ██║     ██║█████╔╝ ██║   ██║ ║  │
-│  ║   ██╔══██║██╔══██╗██║     ██╔══██║    ██║     ██║██╔═██╗ ██║   ██║ ║  │
-│  ║   ██║  ██║██║  ██║╚██████╗██║  ██║    ███████╗██║██║  ██╗╚██████╔╝ ║  │
-│  ║   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝    ╚══════╝╚═╝╚═╝  ╚═╝ ╚═════╝ ║  │
-│  ║                                                   ║  │
-│  ║                    Linux Installer v2.0            ║  │
-│  ╚═══════════════════════════════════════════════════╝  │
-├─────────────────────────────────────────────────────────┤
-│  [✓] Disk: /dev/nvme0n1 (500GB)                         │
-│  [✓] Strategy: LUKS+LVM                                 │
-│  [✓] Boot: UEFI                                         │
-│  [✓] Desktop: KDE Plasma                                │
-│  [✓] User: l4tm                                         │
-├─────────────────────────────────────────────────────────┤
-│  [████████████████████████████████████████████████] 75% │
-│  Installing GRUB...                                     │
-├─────────────────────────────────────────────────────────┤
-│  [ESC] Exit  [H] Help  [L] Logs                         │
+│                    ARCHINSTALL                          │
+│  ════════════════════════════════════════════════════   │
+│            Arch Linux Installation Configuration        │
+│  ════════════════════════════════════════════════════   │
+│                                                         │
+│  ┌─ Configuration Options ─────────────────────────────┐ │
+│  │ Username: [Press Enter]                             │ │
+│  │ User Password: [Press Enter]                        │ │
+│  │ Root Password: [Press Enter]                        │ │
+│  │ Hostname: [Press Enter]                             │ │
+│  │ Disk: [Press Enter]                                 │ │
+│  │ Partitioning Strategy: [Press Enter]                │ │
+│  │ Desktop Environment: [Press Enter]                  │ │
+│  │ Display Manager: [Auto-selected]                    │ │
+│  │ Encryption: [Press Enter]                           │ │
+│  │ Multilib (32-bit): [Press Enter]                    │ │
+│  │ AUR Helper: [Press Enter]                           │ │
+│  │ Timezone Region: [Press Enter]                      │ │
+│  │ Timezone: [Press Enter]                             │ │
+│  │ Locale: [Press Enter]                               │ │
+│  │ Keymap: [Press Enter]                               │ │
+│  │ Bootloader: [Press Enter]                           │ │
+│  │ GRUB Theme: [Press Enter]                           │ │
+│  │ GPU Drivers: [Press Enter]                          │ │
+│  │ Plymouth: [Press Enter]                             │ │
+│  │ Plymouth Theme: [Press Enter]                       │ │
+│  │ Pacman Packages: [Press Enter]                      │ │
+│  │ AUR Packages: [Press Enter]                         │ │
+│  └─────────────────────────────────────────────────────┘ │
+│                                                         │
+│  ════════════════════════════════════════════════════   │
+│  Use ↑↓ to navigate, Enter to open popup, 'q' to quit  │
+│                                                         │
+│  ┌─ START INSTALLATION ───────────────────────────────┐ │
+│  │                                                    │ │
+│  └────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘
-
 ```
 
 ## Requirements
