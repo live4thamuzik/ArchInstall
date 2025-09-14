@@ -5,9 +5,13 @@ A modern, professional Terminal User Interface (TUI) for the Arch Linux Installe
 ## Features
 
 - **Professional Design**: Clean, modern interface with ASCII Arch logo
-- **Real-time Progress**: Live progress bars and status updates
-- **Configuration Display**: Shows all installation settings
-- **Interactive Controls**: Keyboard shortcuts for navigation
+- **Interactive Configuration**: Full configuration interface with highlighting and navigation
+- **Text Input Fields**: Username, passwords, hostname with proper input handling
+- **Popup Selections**: Disk selection, desktop environment, timezone, and more
+- **Auto-selection Logic**: Display manager automatically selected based on desktop environment
+- **Package Management**: Interactive package selection for both Pacman and AUR packages
+- **Plymouth Theme Selection**: Choose between arch-glow and arch-mac-style themes
+- **Real-time Progress**: Live progress bars and status updates during installation
 - **Fast Performance**: Built with Rust for maximum speed
 
 ## Screenshot
@@ -58,15 +62,41 @@ cargo build --release
 ## Running
 
 ```bash
-# Run the demo TUI
-./target/release/archinstall-tui
+# Build the TUI
+cargo build --release
+
+# Copy to root directory
+cp target/release/archinstall-tui .
+
+# Run the TUI (requires sudo for installation)
+sudo ./archinstall-tui
 ```
+
+**Note**: The TUI requires sudo privileges to perform system installation tasks.
 
 ## Controls
 
-- **ESC**: Exit the TUI
-- **H**: Show help
-- **L**: Show logs
+### Main Navigation
+- **↑/↓**: Navigate through configuration options
+- **Enter**: Open popup or start text input for selected option
+- **q**: Quit the application
+
+### Text Input Mode
+- **Type**: Enter text for username, passwords, hostname
+- **Backspace**: Delete characters
+- **Enter**: Confirm input
+
+### Popup Selections
+- **↑/↓**: Navigate through options
+- **Enter**: Select option
+- **ESC**: Cancel and return to main menu
+
+### Package Selection
+- **search <term>**: Search for packages
+- **add <package>**: Add package to selection
+- **remove <package>**: Remove package from selection
+- **list**: Show selected packages
+- **done**: Finish package selection
 
 ## Architecture
 
@@ -76,24 +106,40 @@ The TUI is built with:
 - **`crossterm`**: Cross-platform terminal manipulation
 - **`tokio`**: Async runtime for future features
 
+## Current Status
+
+- [x] **Interactive Configuration**: Full configuration interface with highlighting
+- [x] **Text Input Fields**: Username, passwords, hostname with proper input handling
+- [x] **Popup Selections**: Disk, desktop environment, timezone, and more
+- [x] **Auto-selection Logic**: Display manager based on desktop environment
+- [x] **Package Management**: Interactive package selection for Pacman and AUR
+- [x] **Plymouth Theme Selection**: arch-glow and arch-mac-style themes
+- [x] **Integration with Bash installer**: Full integration with existing scripts
+
 ## Future Features
 
-- [ ] Integration with Bash installer
-- [ ] Real-time log display
-- [ ] Interactive configuration
-- [ ] Progress tracking from actual installation
-- [ ] Error handling and recovery
-- [ ] Multiple themes
-- [ ] Help system
+- [ ] **Scrollable Package Search**: Enhanced package search with arrow key navigation
+- [ ] **Real-time log display**: Live installation logs during setup
+- [ ] **Progress tracking**: Real-time progress from actual installation
+- [ ] **Error handling and recovery**: Better error messages and recovery options
+- [ ] **Multiple themes**: Additional color schemes and layouts
+- [ ] **Help system**: Built-in help and documentation
 
 ## Development
 
-The TUI is designed to be a wrapper around the existing Bash installer. The plan is to:
+The TUI is a complete wrapper around the existing Bash installer. Development phases:
 
-1. **Phase 1**: Standalone TUI demo (current)
-2. **Phase 2**: Integration with Bash installer
-3. **Phase 3**: Full interactive configuration
-4. **Phase 4**: Advanced features and customization
+1. **Phase 1**: ✅ Standalone TUI demo
+2. **Phase 2**: ✅ Integration with Bash installer
+3. **Phase 3**: ✅ Full interactive configuration
+4. **Phase 4**: 🔄 Advanced features and customization (in progress)
+
+### Current Implementation
+
+- **Rust Frontend**: Handles all user interaction and display
+- **Bash Backend**: Executes actual installation tasks
+- **JSON Communication**: Structured data exchange between frontend and backend
+- **Modular Design**: Easy to extend with new features
 
 ## Why Rust + ratatui?
 
