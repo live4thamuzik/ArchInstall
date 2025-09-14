@@ -361,8 +361,20 @@ impl FloatContent for PackageSelection {
                         "add" => {
                             if parts.len() > 1 {
                                 let packages = parts[1..].join(" ");
-                                self.package_list.push_str(&packages);
-                                self.package_list.push(' ');
+                                let package_type = if self.is_pacman { "pacman" } else { "aur" };
+                                
+                                // Add each package to the config file
+                                for package in &parts[1..] {
+                                    match call_script("./config_manager.sh", &["add", package_type, package]) {
+                                        Ok(_) => {
+                                            self.package_list.push_str(package);
+                                            self.package_list.push(' ');
+                                        }
+                                        Err(e) => {
+                                            self.output_lines.push(format!("Failed to add {}: {}", package, e));
+                                        }
+                                    }
+                                }
                                 self.output_lines.push(format!("Added packages: {}", packages));
                             } else {
                                 self.output_lines.push("Usage: add <package1> [package2] ...".to_string());
@@ -371,17 +383,35 @@ impl FloatContent for PackageSelection {
                         "remove" => {
                             if parts.len() > 1 {
                                 let package = parts[1];
-                                self.package_list = self.package_list.replace(&format!("{} ", package), "");
-                                self.output_lines.push(format!("Removed package: {}", package));
+                                let package_type = if self.is_pacman { "pacman" } else { "aur" };
+                                
+                                // Remove package from the config file
+                                match call_script("./config_manager.sh", &["remove", package_type, package]) {
+                                    Ok(_) => {
+                                        self.package_list = self.package_list.replace(&format!("{} ", package), "");
+                                        self.output_lines.push(format!("Removed package: {}", package));
+                                    }
+                                    Err(e) => {
+                                        self.output_lines.push(format!("Failed to remove {}: {}", package, e));
+                                    }
+                                }
                             } else {
                                 self.output_lines.push("Usage: remove <package>".to_string());
                             }
                         }
                         "list" => {
-                            if self.package_list.trim().is_empty() {
-                                self.output_lines.push("No packages selected".to_string());
-                            } else {
-                                self.output_lines.push(format!("Selected packages: {}", self.package_list.trim()));
+                            let package_type = if self.is_pacman { "pacman" } else { "aur" };
+                            match call_script("./config_manager.sh", &["get", package_type]) {
+                                Ok(results) => {
+                                    if results.is_empty() || results[0].trim().is_empty() {
+                                        self.output_lines.push("No packages selected".to_string());
+                                    } else {
+                                        self.output_lines.push(format!("Selected packages: {}", results[0]));
+                                    }
+                                }
+                                Err(e) => {
+                                    self.output_lines.push(format!("Failed to get package list: {}", e));
+                                }
                             }
                         }
                         _ => {
@@ -662,14 +692,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                         });
                                         
                                         if float_result {
-                                            // Floating window is finished, save packages if any were selected
-                                            let config_step = state.config_step;
-                                            if config_step == 20 || config_step == 21 {
-                                                // This is a package selection step, set a placeholder
-                                                state.config_values[config_step] = "packages selected".to_string();
-                                            }
-                                            
-                                            // Return to configuration
+                                            // Floating window is finished, return to configuration
                                             state.focus = Focus::Configuration;
                                             // Clear any popup state
                                             state.popup.is_active = false;
@@ -903,12 +926,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                             state: crossterm::event::KeyEventState::NONE 
                                         };
                                         if float.handle_key_event(&key_event) {
-                                            // Floating window is finished, save packages if any were selected
-                                            let config_step = state.config_step;
-                                            if config_step == 20 || config_step == 21 {
-                                                // This is a package selection step, set a placeholder
-                                                state.config_values[config_step] = "packages selected".to_string();
-                                            }
+                                            // Floating window is finished, return to configuration
                                             state.focus = Focus::Configuration;
                                         }
                                     }
@@ -1014,6 +1032,47 @@ fn is_text_input_field(step: usize) -> bool {
     match step {
         0 | 1 | 2 | 3 => true,  // Username, passwords, hostname
         _ => false,  // Selection-based fields (including disk and packages)
+    }
+}
+
+// Helper function to read selected packages from config file
+fn get_selected_packages(package_type: &str) -> String {
+    // Use the config manager script to get the packages
+    match call_script("./config_manager.sh", &["get", package_type]) {
+        Ok(results) => {
+            if results.is_empty() || results[0].trim().is_empty() {
+                "[Press Enter]".to_string()
+            } else {
+                results[0].clone()
+            }
+        }
+        Err(_) => {
+            // Fallback to the old behavior if config manager fails
+            "[Press Enter]".to_string()
+        }
+    }
+}
+
+// Helper function to call a script directly with arguments
+fn call_script(script_path: &str, args: &[&str]) -> Result<Vec<String>, String> {
+    let mut cmd = Command::new(script_path);
+    cmd.args(args);
+    
+    match cmd.output() {
+        Ok(output) => {
+            if output.status.success() {
+                let output_str = String::from_utf8_lossy(&output.stdout);
+                let lines: Vec<String> = output_str.lines()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                Ok(lines)
+            } else {
+                let error_str = String::from_utf8_lossy(&output.stderr);
+                Err(format!("Script failed: {}", error_str))
+            }
+        }
+        Err(e) => Err(format!("Failed to execute script: {}", e))
     }
 }
 
@@ -1771,19 +1830,9 @@ fn render_configuration_ui(f: &mut Frame, app_state: &mut InstallerState) {
             .style(if app_state.config_step == 18 { Style::default().fg(Color::Yellow) } else { Style::default() }),
         ListItem::new(format!("Plymouth Theme: {}", if app_state.config_values[19].is_empty() { "[Press Enter]" } else { &app_state.config_values[19] }))
             .style(if app_state.config_step == 19 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Pacman Packages: {}", 
-            if app_state.config_values[20].is_empty() { 
-                "[Press Enter]".to_string() 
-            } else { 
-                app_state.config_values[20].clone() 
-            }))
+        ListItem::new(format!("Pacman Packages: {}", get_selected_packages("pacman")))
             .style(if app_state.config_step == 20 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("AUR Packages: {}", 
-            if app_state.config_values[21].is_empty() { 
-                "[Press Enter]".to_string() 
-            } else { 
-                app_state.config_values[21].clone() 
-            }))
+        ListItem::new(format!("AUR Packages: {}", get_selected_packages("aur")))
             .style(if app_state.config_step == 21 { Style::default().fg(Color::Yellow) } else { Style::default() }),
     ];
 
