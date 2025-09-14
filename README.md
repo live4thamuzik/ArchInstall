@@ -1,4 +1,4 @@
-# 🚀 ArchInstall - Advanced Arch Linux Installer --BETA EXPECT ERRORS--
+# 🚀 ArchInstall - Advanced Arch Linux Installer
 
 > **A comprehensive, modular, and user-friendly Arch Linux installation script that bridges the gap between manual installation and automated tools. Features Btrfs snapshots, interactive package selection, and superior customization compared to the official archinstall.**
 
@@ -10,30 +10,56 @@
 
 ## 🎯 Project Philosophy
 
-ArchInstall is designed for users who want the power and flexibility of Arch Linux with the convenience of guided installation. Unlike the official `archinstall` Python script, this Bash-based solution provides:
+ArchInstall is designed for users who want the power and flexibility of Arch Linux with a professional TUI experience. This Rust-based solution complements the official `archinstall` Python script by providing:
 
+- **Professional TUI Interface** - Beautiful floating windows and interactive package selection
 - **Full transparency** - Every step is visible and logged
 - **Modular architecture** - Easy to understand, modify, and extend
-- **Interactive guidance** - No need to memorize complex commands
+- **Interactive guidance** - Shell-like commands for package selection
 - **Comprehensive features** - Everything from basic installation to advanced configurations
 - **The "Arch Way"** - Maintains Arch Linux's DIY philosophy while reducing complexity
-- **Professional TUI** - Beautiful, real-time progress display inspired by Linutil
 - **Live ISO Ready** - Pre-compiled binaries for immediate use on any Arch live media
+- **Unique Experience** - Different approach to installation with focus on TUI interaction
 
-### 🆚 **ArchInstall (Bash) vs. Official archinstall (Python)**
+### 🆚 **ArchInstall (Rust TUI) vs. Official archinstall (Python)**
 
 | Feature | ArchInstall (This) | Official archinstall |
 |---------|-------------------|---------------------|
+| **User Interface** | ✅ Professional TUI with floating windows | ✅ Command-line guided prompts |
+| **Interactive Package Selection** | ✅ Real-time search with shell-like commands | ✅ Package selection during setup |
+| **Pre-configured Profiles** | ❌ Manual configuration only | ✅ Desktop/server/gaming profiles |
+| **Scripting & API** | ❌ TUI application only | ✅ Python library for custom scripts |
+| **Localization** | ❌ English only | ✅ Multiple languages supported |
 | **Btrfs Snapshots** | ✅ Full support with snapper | ✅ Basic support |
-| **Interactive Package Search** | ✅ Real-time search & install | ❌ Pre-configured only |
-| **AUR Package Discovery** | ✅ Web API fallback search | ❌ Limited |
-| **Transparency** | ✅ Full logging & visibility | ❌ Black box |
-| **Customization** | ✅ Modular & extensible | ❌ Fixed workflows |
-| **Error Handling** | ✅ Detailed diagnostics | ❌ Basic error messages |
-| **Boot Integration** | ✅ GRUB snapshot menus | ❌ Limited |
-| **Package Management** | ✅ Smart conditional installs | ❌ Static package lists |
-| **TUI Experience** | ✅ Professional Rust-based TUI | ❌ Basic text interface |
-| **Live ISO Support** | ✅ Pre-compiled binaries | ❌ Requires Python installation |
+| **AUR Integration** | ✅ Built-in AUR helper selection | ✅ AUR helper installation |
+| **Transparency** | ✅ Full logging & visibility | ✅ Detailed installation logs |
+| **Customization** | ✅ Modular & extensible | ✅ Configurable profiles |
+| **Error Handling** | ✅ Detailed diagnostics | ✅ Comprehensive error reporting |
+| **Boot Integration** | ✅ GRUB snapshot menus | ✅ Multiple bootloader support |
+| **Package Management** | ✅ Smart conditional installs | ✅ Flexible package selection |
+| **Live ISO Support** | ✅ Pre-compiled binary, no setup | ✅ Python package or standalone binary |
+| **Desktop Environments** | ✅ Multiple DE support | ✅ Extensive DE profiles |
+| **Network Configuration** | ✅ Automatic detection | ✅ Network setup during install |
+
+### 🤝 **When to Use Each Installer:**
+
+**Choose ArchInstall (This TUI) when:**
+- ✅ You want a **professional TUI experience** with floating windows
+- ✅ You prefer **interactive package selection** with shell-like commands
+- ✅ You need **Btrfs snapshots** with GRUB integration
+- ✅ You want **full transparency** and detailed logging
+- ✅ You're comfortable with **manual configuration** of all options
+- ✅ You want a **pre-compiled binary** that works immediately on live ISO
+
+**Choose Official archinstall (Python) when:**
+- ✅ You need **pre-configured profiles** for quick setup
+- ✅ You want to **script custom installations** using Python API
+- ✅ You need **multiple language support** (localization)
+- ✅ You prefer **command-line guided prompts** over TUI
+- ✅ You want **extensive desktop environment profiles**
+- ✅ You need **automated/headless installations**
+
+**Both installers are excellent choices** - the official archinstall is mature and feature-rich, while this TUI version offers a unique interactive experience with professional interface design.
 
 ---
 
@@ -99,17 +125,20 @@ ArchInstall is designed for users who want the power and flexibility of Arch Lin
    cd ArchInstall
    chmod +x *.sh
    
-   # Option 1: Run with TUI (recommended)
+   # Option 1: Run TUI directly (recommended)
+   ./archinstall-tui
+   
+   # Option 2: Use launcher script
    ./launch_tui_installer.sh
    
-   # Option 2: Run in Bash-only mode
+   # Option 3: Run in Bash-only mode
    ./launch_tui_installer.sh --no-tui
    
-   # Option 3: Run original installer directly
+   # Option 4: Run original installer directly
    ./install_arch.sh
    ```
    
-   **Note:** The launcher automatically makes the TUI binary executable if needed. The TUI binary (`archinstall-tui`) is pre-compiled and included in the repository for live ISO compatibility.
+   **Note:** The TUI binary (`archinstall-tui`) is pre-compiled and included in the repository for live ISO compatibility. No additional setup required!
 
 3. **Follow the interactive prompts:**
    - Configure disk layout and encryption
@@ -125,51 +154,70 @@ ArchInstall is designed for users who want the power and flexibility of Arch Lin
 
 ---
 
-## 🖥️ Text-based User Interface (TUI)
+## 🖥️ Interactive Text-based User Interface (TUI)
 
-> **🆕 New Feature - Beautiful Real-time Progress Display**
+> **🆕 New Feature - Professional Installation Experience with Interactive Package Selection**
 
-ArchInstall now includes a modern TUI built in Rust that provides a beautiful, real-time progress display during installation. Inspired by the excellent [Linutil](https://github.com/ChrisTitusTech/linutil) project, this TUI offers a professional installation experience that rivals commercial installers.
+ArchInstall now includes a modern TUI built in Rust that provides a beautiful, interactive configuration interface and real-time progress display during installation. Inspired by the excellent [Linutil](https://github.com/ChrisTitusTech/linutil) project, this TUI offers a professional installation experience that rivals commercial installers.
 
 ### ✨ **TUI Features:**
 - **🎨 Arch Linux Branding** - Custom ASCII logo and blue color scheme
+- **⚙️ Interactive Configuration** - Navigate through all installation options with arrow keys
+- **📦 Interactive Package Selection** - Real-time package search and selection with shell-like commands
+- **🖼️ Floating Windows** - Professional popup interfaces for package selection
 - **📊 Live Progress Bars** - Real-time installation progress tracking
 - **📝 Status Updates** - Current phase and detailed status messages
 - **🔄 Auto-refresh** - Updates every second during installation
-- **⌨️ Keyboard Controls** - ESC to exit, H for help, L for logs
+- **⌨️ Keyboard Controls** - Arrow keys for navigation, Enter to select, 'q' to quit
 - **🖥️ Terminal Compatibility** - Works with most terminal emulators
 - **🚀 Direct Process Execution** - No file-based communication, more reliable
 
+### 🎯 **Interactive Package Selection:**
+The TUI includes a revolutionary interactive package selection feature that provides a shell-like experience:
+
+- **🔍 Real-time Search** - Search packages with `search <term>` command
+- **➕ Add Packages** - Add packages with `add <package>` command  
+- **➖ Remove Packages** - Remove packages with `remove <package>` command
+- **📋 List Selection** - View current selection with `list` command
+- **✅ Complete Selection** - Finish with `done` command
+- **🚪 Exit Anytime** - Use `exit`, `quit`, or Ctrl+C to close
+- **🖼️ Floating Interface** - Professional popup window with clean display
+
 ### 🚀 **How It Works:**
-1. **Launcher Script** - `launch_tui_installer.sh` handles everything automatically
-2. **Rust TUI** - Beautiful progress display in the main terminal
-3. **Bash Installer** - Executes directly within the TUI process
-4. **Real-time Output Parsing** - Direct stdout/stderr capture and parsing
-5. **Automatic Cleanup** - All temporary files cleaned up on exit
+1. **Launch TUI** - Run `./archinstall-tui` directly (or use launcher script)
+2. **Interactive Configuration** - Navigate through all installation options
+3. **Package Selection** - Use floating window for interactive package selection
+4. **Start Installation** - Press "START INSTALLATION" button
+5. **Real-time Progress** - Watch installation progress with live updates
+6. **Automatic Cleanup** - All temporary files cleaned up on exit
 
 ### 📋 **Installation Options:**
 ```bash
-# TUI Mode (recommended) - Beautiful progress display
+# Direct TUI Mode (recommended) - Full interactive experience
+./archinstall-tui
+
+# Launcher Script Mode - Automatic setup and execution
 ./launch_tui_installer.sh
 
 # Bash-only Mode - Traditional text output
 ./launch_tui_installer.sh --no-tui
 
-# Direct Installer - Skip launcher entirely
+# Direct Installer - Skip TUI entirely
 ./install_arch.sh
 ```
 
 ### 🔧 **Technical Details:**
 - **Built with Rust** - Fast, reliable, and memory-efficient
-- **ratatui Library** - Modern terminal UI framework
-- **Direct Process Execution** - Uses `std::process::Command` for real-time communication
+- **ratatui Library** - Modern terminal UI framework with floating windows
+- **Focus Management** - Proper input routing between main UI and floating windows
 - **Pre-compiled Binary** - TUI binary included in repository for live ISO use
-- **Fallback Support** - Gracefully falls back to Bash mode if needed
 - **Live ISO Compatible** - No Rust installation required on live media
+- **Memory Efficient** - Minimal resource usage with clean rendering
 
 ### ⚠️ **Requirements:**
 - **Terminal emulator** - Any modern terminal (xterm, gnome-terminal, konsole, alacritty, etc.)
 - **Live ISO compatible** - Works on any Arch Linux live ISO without additional setup
+- **Standard libraries** - Only basic system libraries required (already in Arch ISO)
 
 ---
 
@@ -243,17 +291,27 @@ ArchInstall/
 ├── dialogs.sh             # Interactive user interface
 ├── disk_strategies.sh     # Partitioning and storage management
 ├── chroot_config.sh       # Post-installation configuration
-├── launch_tui_installer.sh # TUI launcher script
-├── archinstall-tui        # Pre-compiled Rust TUI binary
+├── progress_comm.sh       # Progress communication utilities
+├── launch_tui_installer.sh # TUI launcher script (optional)
+├── archinstall-tui        # Pre-compiled Rust TUI binary (main interface)
 ├── Cargo.toml             # Rust project configuration
+├── Cargo.lock             # Rust dependency lock file
 ├── src/                   # Rust TUI source code
-│   └── main.rs            # TUI implementation
+│   └── main.rs            # TUI implementation with interactive package selection
+├── target/                # Rust build artifacts
+│   └── release/           # Release build directory
 ├── Source/                # Plymouth themes and assets
 │   └── arch-glow/         # Arch Glow Plymouth theme
 └── README.md              # This file
 ```
 
-**Note:** The TUI binary (`archinstall-tui`) is pre-compiled and included for live ISO compatibility.
+**Key Files:**
+- **`archinstall-tui`** - Main TUI binary with interactive package selection (run this directly)
+- **`install_arch.sh`** - Core installation script called by TUI
+- **`src/main.rs`** - Rust TUI source with floating window package selection
+- **`Source/arch-glow/`** - Custom Plymouth boot splash theme
+
+**Note:** The TUI binary (`archinstall-tui`) is pre-compiled and included for live ISO compatibility. No Rust installation required!
 
 ---
 
@@ -282,10 +340,22 @@ ArchInstall/
 
 ## 🎮 Interactive Package Selection
 
-### Official Packages
-Search and install packages from official repositories during installation:
+> **🆕 Revolutionary TUI-based Package Selection**
+
+The TUI includes a professional interactive package selection feature that provides a shell-like experience within a beautiful floating window interface. This feature is available for both official packages and AUR packages.
+
+### ✨ **How It Works:**
+1. **Navigate to Package Selection** - Use arrow keys to select "Pacman Packages" or "AUR Packages"
+2. **Press Enter** - Opens the interactive package selection floating window
+3. **Use Shell-like Commands** - Type commands just like in a real terminal
+4. **Type 'done'** - Closes the window and shows selected packages in main configuration
+5. **Continue Installation** - Selected packages are automatically included in installation
+
+### 📦 **Official Packages (Pacman)**
+Search and install packages from official repositories:
 
 ```bash
+# In the floating package selection window:
 Package selection> search firefox
 Package selection> add firefox
 Package selection> add thunderbird
@@ -298,14 +368,15 @@ Package selection> done
 - `add <package>` - Add package to installation list
 - `remove <package>` - Remove package from list
 - `list` - Show current selection
-- `done` - Finish selection
+- `done` - Finish selection and return to main configuration
+- `exit` / `quit` - Exit without saving changes
+- `Ctrl+C` - Exit without saving changes
 
-**Note:** Check the "Base Packages Included" section above to avoid installing duplicate packages. The installer automatically includes essential packages by default.
-
-### AUR Packages
+### 🦄 **AUR Packages**
 Install packages from the Arch User Repository (requires AUR helper):
 
 ```bash
+# In the floating package selection window:
 AUR Package selection> search visual-studio-code-bin
 AUR Package selection> add visual-studio-code-bin
 AUR Package selection> add google-chrome
@@ -317,6 +388,21 @@ AUR Package selection> done
 - `paru` - Rust-based alternative
 
 **Note:** AUR helpers are automatically installed when you select AUR package installation. You can choose between yay and paru during the installation process.
+
+### 🎯 **Key Features:**
+- **🖼️ Floating Window Interface** - Professional popup with clean display
+- **⌨️ Shell-like Commands** - Familiar terminal commands for package management
+- **🔍 Real-time Search** - Search packages instantly during selection
+- **📋 Live Package List** - See your selection update in real-time
+- **✅ Visual Confirmation** - Selected packages appear in main configuration
+- **🚪 Easy Exit** - Multiple ways to close and return to main interface
+- **🎨 Clean Display** - No background bleeding or display issues
+
+### 💡 **Tips for Package Selection:**
+- **Check Base Packages** - Review the "Base Packages Included" section to avoid duplicates
+- **Use Search First** - Search for packages before adding to see available options
+- **Test Commands** - Use `list` command to verify your selection
+- **Exit Safely** - Use `done` to save, or `exit`/`quit` to cancel changes
 
 ---
 
