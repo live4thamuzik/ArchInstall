@@ -1723,8 +1723,15 @@ configure_localization_chroot() {
     # Configure locale
     log_info "Configuring locale: $LOCALE..."
     
-    # Uncomment the selected locale in /etc/locale.gen
-    sed -i "s/^#\($LOCALE\)/\1/" /etc/locale.gen || error_exit "Failed to uncomment locale in /etc/locale.gen"
+    # Always ensure English is available as fallback
+    log_info "Ensuring English locale is available as fallback..."
+    sed -i "s/^#\(en_US.UTF-8\)/\1/" /etc/locale.gen || error_exit "Failed to uncomment en_US.UTF-8 in /etc/locale.gen"
+    
+    # Uncomment the selected locale in /etc/locale.gen (if not already English)
+    if [ "$LOCALE" != "en_US.UTF-8" ]; then
+        log_info "Adding selected locale: $LOCALE..."
+        sed -i "s/^#\($LOCALE\)/\1/" /etc/locale.gen || error_exit "Failed to uncomment locale in /etc/locale.gen"
+    fi
     
     # Generate locales
     locale-gen || error_exit "Failed to generate locales"

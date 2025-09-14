@@ -29,7 +29,7 @@ ArchInstall is designed for users who want the power and flexibility of Arch Lin
 | **Interactive Package Selection** | ✅ Real-time search with shell-like commands | ✅ Package selection during setup |
 | **Pre-configured Profiles** | ❌ Manual configuration only | ✅ Desktop/server/gaming profiles |
 | **Scripting & API** | ❌ TUI application only | ✅ Python library for custom scripts |
-| **Localization** | ❌ English only | ✅ Multiple languages supported |
+| **Localization** | ✅ Multiple locales + English fallback | ✅ Multiple languages supported |
 | **Btrfs Snapshots** | ✅ Full support with snapper | ✅ Basic support |
 | **AUR Integration** | ✅ Built-in AUR helper selection | ✅ AUR helper installation |
 | **Transparency** | ✅ Full logging & visibility | ✅ Detailed installation logs |
@@ -54,7 +54,7 @@ ArchInstall is designed for users who want the power and flexibility of Arch Lin
 **Choose Official archinstall (Python) when:**
 - ✅ You need **pre-configured profiles** for quick setup
 - ✅ You want to **script custom installations** using Python API
-- ✅ You need **multiple language support** (localization)
+- ✅ You need **extensive language support** (more locales than our current selection)
 - ✅ You prefer **command-line guided prompts** over TUI
 - ✅ You want **extensive desktop environment profiles**
 - ✅ You need **automated/headless installations**
@@ -660,7 +660,14 @@ Comprehensive internationalization and localization:
 - **Timezone Selection** - Interactive region and city selection with search functionality
 - **US Regional Timezones** - Support for US/Eastern, US/Pacific, etc.
 - **Pagination & Search** - Navigate large timezone lists with arrow keys and search
-- **Locale Configuration** - Support for multiple languages and regions
+- **Locale Configuration** - Support for multiple languages and regions:
+  - **English**: `en_US.UTF-8`, `en_GB.UTF-8`
+  - **German**: `de_DE.UTF-8`
+  - **French**: `fr_FR.UTF-8`
+  - **Spanish**: `es_ES.UTF-8`
+  - **Japanese**: `ja_JP.UTF-8`
+  - **Chinese**: `zh_CN.UTF-8`
+  - **Smart Fallback**: English (`en_US.UTF-8`) is always installed alongside your selected locale to prevent system issues
 - **Console Keymap** - Keyboard layout for both live environment and installed system
 - **UTF-8 Support** - Full Unicode support for international characters
 
