@@ -38,7 +38,7 @@ ArchInstall is designed for users who want the power and flexibility of Arch Lin
 | **Boot Integration** | ✅ GRUB snapshot menus | ✅ Multiple bootloader support |
 | **Package Management** | ✅ Smart conditional installs | ✅ Flexible package selection |
 | **Live ISO Support** | ✅ Pre-compiled binary, no setup | ✅ Python package or standalone binary |
-| **Desktop Environments** | ✅ Multiple DE support | ✅ Extensive DE profiles |
+| **Desktop Environments** | ✅ Full OOBE with GNOME/KDE + browser | ✅ Extensive DE profiles |
 | **Network Configuration** | ✅ Automatic detection | ✅ Network setup during install |
 
 ### 🤝 **When to Use Each Installer:**
@@ -48,7 +48,7 @@ ArchInstall is designed for users who want the power and flexibility of Arch Lin
 - ✅ You prefer **interactive package selection** with shell-like commands
 - ✅ You need **Btrfs snapshots** with GRUB integration
 - ✅ You want **full transparency** and detailed logging
-- ✅ You're comfortable with **manual configuration** of all options
+- ✅ You want **full OOBE** with GNOME/KDE + browser ready to use
 - ✅ You want a **pre-compiled binary** that works immediately on live ISO
 
 **Choose Official archinstall (Python) when:**
@@ -701,28 +701,49 @@ Built-in security measures and verification:
 
 ### **Desktop Environments:**
 - **none** - Server/minimal installation (no GUI)
-- **GNOME** - Modern, touch-friendly desktop environment
-- **KDE Plasma** - Feature-rich, customizable desktop environment  
-- **Hyprland** - Modern tiling window manager with Wayland support
+- **GNOME** - Full OOBE with GNOME Extra, GNOME Tweaks, and Firefox browser
+- **KDE Plasma** - Complete KDE Applications suite with Dolphin file manager and Firefox browser
+- **Hyprland** - Modern tiling window manager with comprehensive Wayland ecosystem
 
 **Note:** Desktop environments are selected during installation and automatically configured. All necessary packages and configurations are handled automatically.
 
-### **Display Managers:**
-- **none** - No display manager (manual start)
-- **GDM** - GNOME Display Manager (recommended for GNOME)
-- **SDDM** - Simple Desktop Display Manager (recommended for KDE/Hyprland)
+### **Full Out-of-Box Experience (OOBE):**
 
-**Note:** Display managers are automatically selected based on your desktop environment choice. No manual configuration required.
+#### **GNOME Installation Includes:**
+- **`gnome`** - Core GNOME desktop environment
+- **`gnome-extra`** - Complete GNOME applications suite (Files, Calculator, Text Editor, etc.)
+- **`gnome-tweaks`** - Advanced GNOME customization tool
+- **`firefox`** - Web browser ready to use immediately
 
-### **Hyprland Features:**
+#### **KDE Installation Includes:**
+- **`plasma-desktop`** - Core KDE Plasma desktop environment
+- **`kde-applications`** - Complete KDE applications suite (Dolphin, Kate, Konsole, etc.)
+- **`dolphin`** - Advanced file manager
+- **`firefox`** - Web browser ready to use immediately
+
+#### **Hyprland Installation Includes:**
 - **Core Hyprland** - Main window manager with Wayland support
 - **Essential Tools** - waybar, wofi, kitty, dunst, hyprpaper
 - **Audio Support** - PipeWire with pavucontrol
 - **Screenshot Tools** - grim, slurp, swappy
+- **Fonts & Icons** - FiraCode Nerd Font, Font Awesome, Noto Emoji
+- **System Integration** - polkit-gnome, xdg-desktop-portal, brightnessctl
 - **Basic Configuration** - Pre-configured with sensible defaults
-- **Auto-start Services** - Automatic startup of essential components
 
-**Note:** Hyprland setup is automatically configured when selected during installation. All necessary packages and configurations are handled automatically.
+### **Display Managers:**
+- **none** - No display manager (manual start)
+- **GDM** - GNOME Display Manager (automatically configured for GNOME)
+- **SDDM** - Simple Desktop Display Manager (automatically configured for KDE/Hyprland)
+
+**Note:** Display managers are automatically selected and configured based on your desktop environment choice. No manual configuration required.
+
+### **Ready to Use:**
+After installation, your system boots directly to a fully functional desktop environment with:
+- ✅ **Web browser** (Firefox) pre-installed and ready
+- ✅ **File manager** (Nautilus/Dolphin) for file operations
+- ✅ **Complete application suite** for productivity
+- ✅ **Display manager** automatically starting
+- ✅ **All necessary drivers** and system integration
 
 ---
 
