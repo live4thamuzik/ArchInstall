@@ -1,111 +1,143 @@
 #!/bin/bash
+# config_manager.sh - Manages package configuration for the installer
 
-# Simple config manager for package selection
-CONFIG_FILE="/tmp/archinstall_config.json"
+CONFIG_FILE="install_config.conf"
 
-# Initialize config file if it doesn't exist
-init_config() {
-    if [ ! -f "$CONFIG_FILE" ]; then
-        cat > "$CONFIG_FILE" << 'EOF'
-{
-  "selected_pacman_packages": [],
-  "selected_aur_packages": []
-}
-EOF
-    fi
-}
-
-# Add a package to the config
-add_package() {
-    local package_type="$1"  # "pacman" or "aur"
-    local package_name="$2"
-    
-    init_config
-    
-    # Use jq to add the package to the appropriate array
-    if command -v jq >/dev/null 2>&1; then
-        if [ "$package_type" = "pacman" ]; then
-            rm -f "$CONFIG_FILE.tmp"
-            jq --arg pkg "$package_name" '.selected_pacman_packages += [$pkg]' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-        else
-            rm -f "$CONFIG_FILE.tmp"
-            jq --arg pkg "$package_name" '.selected_aur_packages += [$pkg]' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-        fi
-    else
-        echo "Warning: jq not available, using fallback method"
-        echo "Added $package_name to $package_type packages"
-    fi
-}
-
-# Remove a package from the config
-remove_package() {
-    local package_type="$1"  # "pacman" or "aur"
-    local package_name="$2"
-    
-    init_config
-    
-    if command -v jq >/dev/null 2>&1; then
-        if [ "$package_type" = "pacman" ]; then
-            rm -f "$CONFIG_FILE.tmp"
-            jq --arg pkg "$package_name" 'del(.selected_pacman_packages[] | select(. == $pkg))' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-        else
-            rm -f "$CONFIG_FILE.tmp"
-            jq --arg pkg "$package_name" 'del(.selected_aur_packages[] | select(. == $pkg))' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-        fi
-    else
-        echo "Warning: jq not available, using fallback method"
-        echo "Removed $package_name from $package_type packages"
-    fi
-}
-
-# Get the list of selected packages
+# Function to get current packages
 get_packages() {
-    local package_type="$1"  # "pacman" or "aur"
+    local package_type="$1"
+    local key="${package_type}_packages"
     
-    init_config
-    
-    if command -v jq >/dev/null 2>&1; then
-        if [ "$package_type" = "pacman" ]; then
-            jq -r '.selected_pacman_packages | join(", ")' "$CONFIG_FILE"
-        else
-            jq -r '.selected_aur_packages | join(", ")' "$CONFIG_FILE"
-        fi
+    if [[ -f "$CONFIG_FILE" ]]; then
+        grep "^${key}=" "$CONFIG_FILE" | cut -d'=' -f2- | tr -d '"'
     else
-        echo "No packages selected"
+        echo ""
     fi
 }
 
-# Get the raw config file path
-get_config_file() {
-    init_config
-    echo "$CONFIG_FILE"
+# Function to add a package
+add_package() {
+    local package_type="$1"
+    local package_name="$2"
+    local key="${package_type}_packages"
+    
+    # Get current packages
+    local current_packages=$(get_packages "$package_type")
+    
+    # Check if package is already in the list (exact match only)
+    for existing_package in $current_packages; do
+        if [[ "$existing_package" == "$package_name" ]]; then
+            echo "Package $package_name is already in the list"
+            return 0
+        fi
+    done
+    
+    # Add the package
+    if [[ -z "$current_packages" ]]; then
+        new_packages="$package_name"
+    else
+        new_packages="$current_packages $package_name"
+    fi
+    
+    # Update the config file
+    if [[ -f "$CONFIG_FILE" ]]; then
+        # Update existing line
+        if grep -q "^${key}=" "$CONFIG_FILE"; then
+            sed -i "s/^${key}=.*/${key}=\"${new_packages}\"/" "$CONFIG_FILE"
+        else
+            echo "${key}=\"${new_packages}\"" >> "$CONFIG_FILE"
+        fi
+    else
+        # Create new config file
+        echo "${key}=\"${new_packages}\"" > "$CONFIG_FILE"
+    fi
+    
+    echo "Added package: $package_name"
 }
 
-# Main function to handle commands
+# Function to remove a package
+remove_package() {
+    local package_type="$1"
+    local package_name="$2"
+    local key="${package_type}_packages"
+    
+    # Get current packages
+    local current_packages=$(get_packages "$package_type")
+    
+    # Remove the package more precisely - only remove exact package names
+    # Split packages into array, filter out the exact package, then rejoin
+    local new_packages=""
+    local found=false
+    
+    for package in $current_packages; do
+        if [[ "$package" == "$package_name" ]]; then
+            found=true
+            # Skip this package (remove it)
+            continue
+        else
+            # Keep this package
+            if [[ -z "$new_packages" ]]; then
+                new_packages="$package"
+            else
+                new_packages="$new_packages $package"
+            fi
+        fi
+    done
+    
+    # Update the config file
+    if [[ -f "$CONFIG_FILE" ]]; then
+        if grep -q "^${key}=" "$CONFIG_FILE"; then
+            sed -i "s/^${key}=.*/${key}=\"${new_packages}\"/" "$CONFIG_FILE"
+        fi
+    fi
+    
+    if [[ "$found" == "true" ]]; then
+        echo "Removed package: $package_name"
+    else
+        echo "Package $package_name not found in list"
+    fi
+}
+
+# Function to set packages (replace entire list)
+set_packages() {
+    local package_type="$1"
+    local packages="$2"
+    local key="${package_type}_packages"
+    
+    # Update the config file
+    if [[ -f "$CONFIG_FILE" ]]; then
+        if grep -q "^${key}=" "$CONFIG_FILE"; then
+            sed -i "s/^${key}=.*/${key}=\"${packages}\"/" "$CONFIG_FILE"
+        else
+            echo "${key}=\"${packages}\"" >> "$CONFIG_FILE"
+        fi
+    else
+        echo "${key}=\"${packages}\"" > "$CONFIG_FILE"
+    fi
+    
+    echo "Set packages: $packages"
+}
+
+# Main command handling
 case "$1" in
+    "get")
+        get_packages "$2"
+        ;;
     "add")
         add_package "$2" "$3"
         ;;
     "remove")
         remove_package "$2" "$3"
         ;;
-    "get")
-        get_packages "$2"
-        ;;
-    "init")
-        init_config
-        ;;
-    "file")
-        get_config_file
+    "set")
+        set_packages "$2" "$3"
         ;;
     *)
-        echo "Usage: $0 {add|remove|get|init|file} [package_type] [package_name]"
-        echo "  add pacman firefox    - Add firefox to pacman packages"
-        echo "  remove aur yay        - Remove yay from aur packages"
-        echo "  get pacman            - Get list of selected pacman packages"
-        echo "  get aur               - Get list of selected aur packages"
-        echo "  init                  - Initialize config file"
-        echo "  file                  - Get config file path"
+        echo "Usage: $0 {get|add|remove|set} <package_type> [package_name|packages]"
+        echo "  get <package_type> - Get current packages"
+        echo "  add <package_type> <package_name> - Add a package"
+        echo "  remove <package_type> <package_name> - Remove a package"
+        echo "  set <package_type> <packages> - Set entire package list"
         exit 1
         ;;
 esac

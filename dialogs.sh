@@ -976,60 +976,111 @@ prompt_reboot_system() {
 
 # --- Interactive Package Selection Functions ---
 
-# Searches for packages using pacman -Ss
+# Searches for packages using pacman -Ss and outputs a JSON array
 search_packages() {
     local search_term="$1"
-    local results_file="/tmp/package_search_results.txt"
     
-    echo "Searching for packages matching: $search_term"
-    pacman -Ss "$search_term" > "$results_file" 2>/dev/null
-    
-    if [ ! -s "$results_file" ]; then
-        echo "No packages found matching: $search_term"
-        return 1
-    fi
-    
-    # Display results with line numbers
-    echo "Search results:"
-    echo "==============="
-    nl -w3 -s": " "$results_file"
-    echo "==============="
-    return 0
+    # Use pacman -Ss to get a list of all packages and their descriptions.
+    # Process the output with a simple approach that uses jq for JSON generation.
+    pacman -Ss "$search_term" 2>/dev/null | while IFS= read -r line; do
+        if [[ $line =~ ^[a-z]+/ ]]; then
+            # This is a package line
+            read -r repo_name version installed_flag <<< "$line"
+            package_name="${repo_name#*/}"
+            installed="false"
+            if [[ "$installed_flag" == "[installed]" ]]; then
+                installed="true"
+            fi
+            
+            # Read the next line for description
+            read -r description
+            description="${description#    }"  # Remove leading spaces
+            
+            # Use jq to generate JSON object
+            jq -n --arg name "$package_name" \
+                   --arg version "$version" \
+                   --argjson installed "$installed" \
+                   --arg repo "$repo_name" \
+                   --arg description "$description" \
+                   '{name: $name, version: $version, installed: $installed, repo: $repo, description: $description}'
+        fi
+    done | jq -s '.'
+
+    return $?
 }
 
 # Searches for AUR packages using available AUR helper or curl
 search_aur_packages() {
     local search_term="$1"
-    local results_file="/tmp/aur_search_results.txt"
-    
-    echo "Searching AUR for packages matching: $search_term"
     
     # Method 1: Try using available AUR helper
     if command -v paru &> /dev/null; then
-        paru -Ss "$search_term" > "$results_file" 2>/dev/null
+        paru -Ss "$search_term" 2>/dev/null | while IFS= read -r line; do
+            if [[ $line =~ ^aur/ ]]; then
+                # This is a package line
+                read -r repo_name version installed_flag <<< "$line"
+                package_name="${repo_name#aur/}"
+                installed="false"
+                if [[ "$installed_flag" == "[installed]" ]]; then
+                    installed="true"
+                fi
+                
+                # Read the next line for description
+                read -r description
+                description="${description#    }"  # Remove leading spaces
+                
+                # Use jq to generate JSON object
+                jq -n --arg name "$package_name" \
+                       --arg version "$version" \
+                       --argjson installed "$installed" \
+                       --arg repo "$repo_name" \
+                       --arg description "$description" \
+                       '{name: $name, version: $version, installed: $installed, repo: $repo, description: $description}'
+            fi
+        done | jq -s '.'
+    
     elif command -v yay &> /dev/null; then
-        yay -Ss "$search_term" > "$results_file" 2>/dev/null
+        yay -Ss "$search_term" 2>/dev/null | while IFS= read -r line; do
+            if [[ $line =~ ^aur/ ]]; then
+                # This is a package line
+                read -r repo_name version installed_flag <<< "$line"
+                package_name="${repo_name#aur/}"
+                installed="false"
+                if [[ "$installed_flag" == "[installed]" ]]; then
+                    installed="true"
+                fi
+                
+                # Read the next line for description
+                read -r description
+                description="${description#    }"  # Remove leading spaces
+                
+                # Use jq to generate JSON object
+                jq -n --arg name "$package_name" \
+                       --arg version "$version" \
+                       --argjson installed "$installed" \
+                       --arg repo "$repo_name" \
+                       --arg description "$description" \
+                       '{name: $name, version: $version, installed: $installed, repo: $repo, description: $description}'
+            fi
+        done | jq -s '.'
+    
     else
         # Method 2: Use curl to search AUR web interface (fallback)
-        echo "AUR helper not available, using web search as fallback..."
         local aur_url="https://aur.archlinux.org/rpc/?v=5&type=search&arg=$search_term"
         
         if command -v curl &> /dev/null; then
-            # Use curl to search AUR API
-            curl -s "$aur_url" | grep -o '"Name":"[^"]*"' | sed 's/"Name":"//g' | sed 's/"//g' > "$results_file" 2>/dev/null
-            
-            if [ ! -s "$results_file" ]; then
-                echo "No AUR packages found matching: $search_term"
-                return 1
-            fi
-            
-            # Display results
-            echo "AUR search results (from web API):"
-            echo "=================================="
-            nl -w3 -s": " "$results_file"
-            echo "=================================="
-            echo "Note: This is a basic search. For detailed package info, install an AUR helper first."
-            return 0
+            # Use curl to search AUR API and format as JSON
+            curl -s "$aur_url" | jq -r '.results[] | "NAME=\(.Name)|VERSION=unknown|INSTALLED=false|REPO=aur|DESCRIPTION=\(.Description // "AUR package")"' | \
+            while IFS="|" read -r -a parts; do
+                local name="${parts[0]#NAME=}"
+                local version="${parts[1]#VERSION=}"
+                local installed="${parts[2]#INSTALLED=}"
+                local repo="${parts[3]#REPO=}"
+                local description="${parts[4]#DESCRIPTION=}"
+
+                jq -n --arg name "$name" --arg version "$version" --arg installed "$installed" --arg repo "$repo" --arg description "$description" \
+                   '{name: $name, version: $version, installed: ($installed == "true"), repo: $repo, description: $description}'
+            done | jq -s '.'
         else
             echo "Neither AUR helper nor curl available for AUR search."
             echo "Please install an AUR helper (yay/paru) or curl first."
@@ -1037,17 +1088,7 @@ search_aur_packages() {
         fi
     fi
     
-    if [ ! -s "$results_file" ]; then
-        echo "No AUR packages found matching: $search_term"
-        return 1
-    fi
-    
-    # Display results with line numbers
-    echo "AUR search results:"
-    echo "=================="
-    nl -w3 -s": " "$results_file"
-    echo "=================="
-    return 0
+    return $?
 }
 
 # Interactive package selection for official repositories
