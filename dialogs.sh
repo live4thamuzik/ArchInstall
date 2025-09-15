@@ -1091,186 +1091,21 @@ search_aur_packages() {
     return $?
 }
 
-# Interactive package selection for official repositories
-select_custom_packages() {
-    echo "=== Interactive Package Selection ==="
-    echo "You can search for packages and add them to your installation."
-    echo "Commands:"
-    echo "  search <term>  - Search for packages"
-    echo "  add <package>  - Add package to installation list"
-    echo "  remove <package> - Remove package from installation list"
-    echo "  list           - Show current package list"
-    echo "  done           - Finish package selection"
-    echo ""
-    
-    local selected_packages=()
-    local continue_selection=true
-    
-    while [ "$continue_selection" == "true" ]; do
-        echo -n "Package selection> "
-        read -r command package_name
-        
-        case "$command" in
-            "search")
-                if [ -n "$package_name" ]; then
-                    search_packages "$package_name"
-                else
-                    echo "Usage: search <search_term>"
-                fi
-                ;;
-            "add")
-                if [ -n "$package_name" ]; then
-                    # Check if package exists
-                    if pacman -Si "$package_name" &>/dev/null; then
-                        selected_packages+=("$package_name")
-                        echo "Added: $package_name"
-                    else
-                        echo "Package \"$package_name\" not found in official repositories"
-                    fi
-                else
-                    echo "Usage: add <package_name>"
-                fi
-                ;;
-            "remove")
-                if [ -n "$package_name" ]; then
-                    local found=false
-                    local new_packages=()
-                    for pkg in "${selected_packages[@]}"; do
-                        if [ "$pkg" != "$package_name" ]; then
-                            new_packages+=("$pkg")
-                        else
-                            found=true
-                        fi
-                    done
-                    selected_packages=("${new_packages[@]}")
-                    if [ "$found" == "true" ]; then
-                        echo "Removed: $package_name"
-                    else
-                        echo "Package \"$package_name\" not in selection list"
-                    fi
-                else
-                    echo "Usage: remove <package_name>"
-                fi
-                ;;
-            "list")
-                if [ ${#selected_packages[@]} -eq 0 ]; then
-                    echo "No packages selected"
-                else
-                    echo "Selected packages:"
-                    for pkg in "${selected_packages[@]}"; do
-                        echo "  - $pkg"
-                    done
-                fi
-                ;;
-            "done")
-                continue_selection=false
-                ;;
-            *)
-                echo "Unknown command: $command"
-                echo "Available commands: search, add, remove, list, done"
-                ;;
-        esac
-        echo ""
-    done
-    
-    # Set the global variable
-    if [ ${#selected_packages[@]} -gt 0 ]; then
-        CUSTOM_PACKAGES="${selected_packages[*]}"
-        echo "Final package selection: $CUSTOM_PACKAGES"
-    else
-        CUSTOM_PACKAGES=""
-        echo "No packages selected"
-    fi
-}
-
-# Interactive package selection for AUR repositories
-select_custom_aur_packages() {
-    echo "=== Interactive AUR Package Selection ==="
-    echo "You can search for AUR packages and add them to your installation."
-    echo "Commands:"
-    echo "  search <term>  - Search AUR for packages"
-    echo "  add <package>  - Add AUR package to installation list"
-    echo "  remove <package> - Remove AUR package from installation list"
-    echo "  list           - Show current AUR package list"
-    echo "  done           - Finish AUR package selection"
-    echo ""
-    
-    local selected_aur_packages=()
-    local continue_selection=true
-    
-    while [ "$continue_selection" == "true" ]; do
-        echo -n "AUR package selection> "
-        read -r command package_name
-        
-        case "$command" in
-            "search")
-                if [ -n "$package_name" ]; then
-                    search_aur_packages "$package_name"
-                else
-                    echo "Usage: search <search_term>"
-                fi
-                ;;
-            "add")
-                if [ -n "$package_name" ]; then
-                    # For AUR packages, we cannot easily verify existence without the helper
-                    # So we will just add it and let the installation process handle errors
-                    selected_aur_packages+=("$package_name")
-                    echo "Added: $package_name (will be verified during installation)"
-                else
-                    echo "Usage: add <package_name>"
-                fi
-                ;;
-            "remove")
-                if [ -n "$package_name" ]; then
-                    local found=false
-                    local new_packages=()
-                    for pkg in "${selected_aur_packages[@]}"; do
-                        if [ "$pkg" != "$package_name" ]; then
-                            new_packages+=("$pkg")
-                        else
-                            found=true
-                        fi
-                    done
-                    selected_aur_packages=("${new_packages[@]}")
-                    if [ "$found" == "true" ]; then
-                        echo "Removed: $package_name"
-                    else
-                        echo "Package \"$package_name\" not in selection list"
-                    fi
-                else
-                    echo "Usage: remove <package_name>"
-                fi
-                ;;
-            "list")
-                if [ ${#selected_aur_packages[@]} -eq 0 ]; then
-                    echo "No AUR packages selected"
-                else
-                    echo "Selected AUR packages:"
-                    for pkg in "${selected_aur_packages[@]}"; do
-                        echo "  - $pkg"
-                    done
-                fi
-                ;;
-            "done")
-                continue_selection=false
-                ;;
-            *)
-                echo "Unknown command: $command"
-                echo "Available commands: search, add, remove, list, done"
-                ;;
-        esac
-        echo ""
-    done
-    
-    # Set the global variable
-    if [ ${#selected_aur_packages[@]} -gt 0 ]; then
-        CUSTOM_AUR_PACKAGES="${selected_aur_packages[*]}"
-        echo "Final AUR package selection: $CUSTOM_AUR_PACKAGES"
-    else
-        CUSTOM_AUR_PACKAGES=""
-        echo "No AUR packages selected"
-    fi
-}
+# =============================================================================
+# PACKAGE SELECTION FUNCTIONS - REFACTORED FOR TUI INTEGRATION
+# =============================================================================
+# 
+# The interactive package selection functions (select_custom_packages and 
+# select_custom_aur_packages) have been REMOVED and replaced by the TUI 
+# PackageSelection interface in main.rs.
+#
+# The TUI now handles all package selection interactivity, while this script
+# provides the non-interactive backend functions:
+# - search_packages() - Returns JSON for Pacman package search
+# - search_aur_packages() - Returns JSON for AUR package search
+#
+# This creates a clean separation: TUI handles UX, Bash handles system operations.
+# =============================================================================
 
 # --- Utility Functions ---
 # Prompts for a number input with default value
