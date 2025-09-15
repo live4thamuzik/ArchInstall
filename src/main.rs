@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Style, Modifier},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Wrap, Clear},
+    widgets::{Block, Borders, Gauge, List, ListItem, ListState, Paragraph, Wrap, Clear},
     Frame, Terminal,
 };
 use std::io::{stdout, BufRead, BufReader};
@@ -13,9 +13,20 @@ use std::thread;
 use std::time::Duration;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use serde::{Deserialize, Serialize};
+use serde_json;
 
 // Global interrupt flag
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+// Package structure for structured package data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Package {
+    pub repo: String,
+    pub name: String,
+    pub version: String,
+    pub installed: bool,
+    pub description: String,
+}
 
 // Structured communication protocol between TUI and Bash scripts
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,13 +219,17 @@ impl<Content: FloatContent + ?Sized> Float<Content> {
     }
 }
 
-// PackageSelection using simple text input
+// PackageSelection using structured data and scrolling
 pub struct PackageSelection {
     current_input: String,
     output_lines: Vec<String>,
     scroll_offset: usize,
     package_list: String,
     is_pacman: bool,
+    // New fields for structured package data and scrolling
+    search_results: Vec<Package>,
+    list_state: ListState,
+    show_search_results: bool,
 }
 
 impl PackageSelection {
@@ -229,14 +244,17 @@ impl PackageSelection {
             "done - Finish package selection".to_string(),
             "".to_string(),
             "Examples:".to_string(),
-            "search neofetch".to_string(),
-            "add neofetch".to_string(),
-            "".to_string(),
         ];
         
         if is_pacman {
+            output_lines.push("search firefox".to_string());
+            output_lines.push("add firefox".to_string());
+            output_lines.push("".to_string());
             output_lines.push("Package selection> ".to_string());
         } else {
+            output_lines.push("search chromium".to_string());
+            output_lines.push("add chromium".to_string());
+            output_lines.push("".to_string());
             output_lines.push("AUR package selection> ".to_string());
         }
         
@@ -246,6 +264,9 @@ impl PackageSelection {
             scroll_offset: 0,
             package_list: String::new(),
             is_pacman,
+            search_results: Vec::new(),
+            list_state: ListState::default(),
+            show_search_results: false,
         }
     }
     
@@ -280,27 +301,156 @@ impl FloatContent for PackageSelection {
             height: area.height.saturating_sub(2),
         };
 
-        // Create list items from output lines
-        let mut list_items: Vec<ListItem> = self.output_lines
-            .iter()
-            .skip(self.scroll_offset)
-            .take(inner_area.height as usize)
-            .map(|line| ListItem::new(line.as_str()))
-            .collect();
+        if self.show_search_results {
+            // Display search results with scrolling
+            let package_items: Vec<ListItem> = self.search_results
+                .iter()
+                .map(|p| {
+                    let status = if p.installed { "[I]" } else { "[ ]" };
+                    
+                    // Check if this package is already selected in our config
+                    let is_selected = self.package_list.contains(&p.name);
+                    let selection_indicator = if is_selected { "✓" } else { " " };
+                    
+                    let text = format!("{} {} {}/{} ({}) - {}", 
+                        status, selection_indicator, p.repo, p.name, p.version, p.description);
+                    
+                    // Style selected packages differently
+                    let style = if is_selected {
+                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+                    
+                    ListItem::new(text).style(style)
+                })
+                .collect();
 
-        // Add current input line
-        let prompt = if self.is_pacman { "Package selection> " } else { "AUR package selection> " };
-        let input_line = format!("{}{}", prompt, self.current_input);
-        list_items.push(ListItem::new(input_line).style(Style::default().fg(Color::Yellow)));
+            let search_list = List::new(package_items)
+                .block(block.title("Search Results - ↑↓ Navigate | Enter Toggle Selection | 'q' Exit"))
+                .highlight_style(Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD))
+                .highlight_symbol(">> ");
 
-        let list = List::new(list_items)
-            .block(block)
-            .style(Style::default().bg(Color::Black).fg(Color::White));
+            frame.render_stateful_widget(search_list, area, &mut self.list_state);
+            
+            // Add instructions at the bottom
+            let instruction_text = "↑↓ Navigate | Enter Toggle Selection | 'q' Exit Search";
+            let instruction_para = Paragraph::new(instruction_text)
+                .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                .alignment(Alignment::Center);
+            
+            let instruction_area = Rect {
+                x: area.x,
+                y: area.y + area.height - 1,
+                width: area.width,
+                height: 1,
+            };
+            frame.render_widget(instruction_para, instruction_area);
+        } else {
+            // Display normal command interface
+            let mut list_items: Vec<ListItem> = self.output_lines
+                .iter()
+                .skip(self.scroll_offset)
+                .take(inner_area.height as usize)
+                .map(|line| ListItem::new(line.as_str()))
+                .collect();
 
-        frame.render_widget(list, area);
+            // Add current input line
+            let prompt = if self.is_pacman { "Package selection> " } else { "AUR package selection> " };
+            let input_line = format!("{}{}", prompt, self.current_input);
+            list_items.push(ListItem::new(input_line).style(Style::default().fg(Color::Yellow)));
+
+            let list = List::new(list_items)
+                .block(block)
+                .style(Style::default().bg(Color::Black).fg(Color::White));
+
+            frame.render_widget(list, area);
+        }
     }
 
     fn handle_key_event(&mut self, key: &KeyEvent) -> bool {
+        // Handle scrolling when search results are shown
+        if self.show_search_results {
+            match key.code {
+                KeyCode::Up => {
+                    if let Some(selected) = self.list_state.selected() {
+                        if selected > 0 {
+                            self.list_state.select(Some(selected - 1));
+                        }
+                    }
+                    return false;
+                }
+                KeyCode::Down => {
+                    if let Some(selected) = self.list_state.selected() {
+                        if selected < self.search_results.len() - 1 {
+                            self.list_state.select(Some(selected + 1));
+                        }
+                    } else if !self.search_results.is_empty() {
+                        self.list_state.select(Some(0));
+                    }
+                    return false;
+                }
+                KeyCode::Enter => {
+                    // Toggle selected package (add if not selected, remove if selected)
+                    if let Some(selected) = self.list_state.selected() {
+                        if let Some(package) = self.search_results.get(selected) {
+                            let package_type = if self.is_pacman { "pacman" } else { "aur" };
+                            let is_already_selected = self.package_list.contains(&package.name);
+                            
+                            if is_already_selected {
+                                // Remove package
+                                self.output_lines.push(format!("Removing package: {} ({})", package.name, package_type));
+                                match call_script("./config_manager.sh", &["remove", package_type, &package.name]) {
+                                    Ok(_) => {
+                                        // Remove from our local list
+                                        self.package_list = self.package_list
+                                            .split_whitespace()
+                                            .filter(|&p| p != package.name)
+                                            .collect::<Vec<&str>>()
+                                            .join(" ");
+                                        if !self.package_list.is_empty() {
+                                            self.package_list.push(' ');
+                                        }
+                                        self.output_lines.push(format!("✓ Removed package: {}", package.name));
+                                    }
+                                    Err(e) => {
+                                        self.output_lines.push(format!("Failed to remove {}: {}", package.name, e));
+                                    }
+                                }
+                            } else {
+                                // Add package
+                                self.output_lines.push(format!("Adding package: {} ({})", package.name, package_type));
+                                match call_script("./config_manager.sh", &["add", package_type, &package.name]) {
+                                    Ok(_) => {
+                                        self.package_list.push_str(&package.name);
+                                        self.package_list.push(' ');
+                                        self.output_lines.push(format!("✓ Added package: {}", package.name));
+                                    }
+                                    Err(e) => {
+                                        self.output_lines.push(format!("Failed to add {}: {}", package.name, e));
+                                    }
+                                }
+                            }
+                        } else {
+                            self.output_lines.push("No package found at selected index".to_string());
+                        }
+                    } else {
+                        self.output_lines.push("No package selected".to_string());
+                    }
+                    return false;
+                }
+                KeyCode::Char('q') => {
+                    // Exit search results view
+                    self.show_search_results = false;
+                    self.search_results.clear();
+                    self.list_state.select(None);
+                    return false;
+                }
+                _ => return false,
+            }
+        }
+
+        // Handle normal command input
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return true; // Close the window
@@ -334,24 +484,32 @@ impl FloatContent for PackageSelection {
                                 let term = parts[1..].join(" ");
                                 self.output_lines.push(format!("Searching for '{}'...", term));
                                 
-                                // Use the appropriate Bash function based on package type
                                 let function_name = if self.is_pacman { "search_packages" } else { "search_aur_packages" };
                                 match call_bash_function("./dialogs.sh", function_name, &[&term]) {
                                     Ok(results) => {
                                         if results.is_empty() {
                                             self.output_lines.push(format!("No packages found matching: {}", term));
                                         } else {
-                                            for result in results {
-                                                self.output_lines.push(result);
+                                            // The bash script should output clean JSON
+                                            let json_output = results.join("\n");
+                                            
+                                            match serde_json::from_str::<Vec<Package>>(&json_output) {
+                                                Ok(packages) => {
+                                                    self.search_results = packages;
+                                                    self.show_search_results = true;
+                                                    self.list_state.select(Some(0));
+                                                    self.output_lines.push(format!("Found {} packages. Use ↑↓ to navigate, Enter to add, 'q' to exit", self.search_results.len()));
+                                                }
+                                                Err(e) => {
+                                                    self.output_lines.push(format!("JSON parsing error: {}", e));
+                                                    self.output_lines.push("Raw output:".to_string());
+                                                    self.output_lines.extend(results);
+                                                }
                                             }
                                         }
                                     }
                                     Err(e) => {
                                         self.output_lines.push(format!("Search failed: {}", e));
-                                        // Fallback to mock results if Bash function fails
-                                        self.output_lines.push(format!("Found packages matching '{}':", term));
-                                        self.output_lines.push(format!("  {}-1.0-1 (Package 1)", term));
-                                        self.output_lines.push(format!("  {}-2.0-1 (Package 2)", term));
                                     }
                                 }
                             } else {
@@ -601,8 +759,32 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                 Event::Key(KeyEvent { code, modifiers, .. }) => {
                     match code {
                         KeyCode::Char('q') | KeyCode::Esc => {
-                            // Always allow quit
-                            break;
+                            let mut state = app_state.lock().unwrap();
+                            
+                            // If a floating window is active, let it handle the key first
+                            if state.is_configuring {
+                                match &mut state.focus {
+                                    Focus::FloatingWindow(float) => {
+                                        let key_event = KeyEvent { 
+                                            code, 
+                                            modifiers, 
+                                            kind: crossterm::event::KeyEventKind::Press, 
+                                            state: crossterm::event::KeyEventState::NONE 
+                                        };
+                                        if float.handle_key_event(&key_event) {
+                                            state.focus = Focus::Configuration;
+                                        }
+                                        continue; // Don't quit the TUI, let the floating window handle it
+                                    }
+                                    Focus::Configuration => {
+                                        // Only quit if we're on the main configuration screen
+                                        break;
+                                    }
+                                }
+                            } else {
+                                // Always allow quit from main menu
+                                break;
+                            }
                         }
                         KeyCode::Char('s') => {
                             let mut state = app_state.lock().unwrap();
@@ -965,7 +1147,18 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                             // Navigate popup or configuration options
                             let mut state = app_state.lock().unwrap();
                             if state.is_configuring {
-                                if state.popup.is_active {
+                                // Check if we're in a floating window first
+                                if let Focus::FloatingWindow(float) = &mut state.focus {
+                                    let key_event = KeyEvent { 
+                                        code: KeyCode::Up, 
+                                        modifiers, 
+                                        kind: crossterm::event::KeyEventKind::Press, 
+                                        state: crossterm::event::KeyEventState::NONE 
+                                    };
+                                    if float.handle_key_event(&key_event) {
+                                        state.focus = Focus::Configuration;
+                                    }
+                                } else if state.popup.is_active {
                                     // Navigate popup options
                                     if state.popup.selected_index > 0 {
                                         state.popup.selected_index -= 1;
@@ -985,7 +1178,18 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                             // Navigate popup or configuration options
                             let mut state = app_state.lock().unwrap();
                             if state.is_configuring {
-                                if state.popup.is_active {
+                                // Check if we're in a floating window first
+                                if let Focus::FloatingWindow(float) = &mut state.focus {
+                                    let key_event = KeyEvent { 
+                                        code: KeyCode::Down, 
+                                        modifiers, 
+                                        kind: crossterm::event::KeyEventKind::Press, 
+                                        state: crossterm::event::KeyEventState::NONE 
+                                    };
+                                    if float.handle_key_event(&key_event) {
+                                        state.focus = Focus::Configuration;
+                                    }
+                                } else if state.popup.is_active {
                                     // Navigate popup options
                                     if state.popup.selected_index < state.popup.options.len().saturating_sub(1) {
                                         state.popup.selected_index += 1;
@@ -1677,11 +1881,11 @@ fn parse_installer_output(app_state: &Arc<Mutex<InstallerState>>, line: &str) {
 fn ui(f: &mut Frame, app_state: &mut InstallerState) {
     let size = f.area();
     
-    // Check if terminal is too small
-    if size.height < 20 || size.width < 80 {
-        render_minimal_ui(f, app_state);
-        return;
-    }
+    // Check if terminal is too small - DISABLED to force full UI
+    // if size.height < 10 || size.width < 40 {
+    //     render_minimal_ui(f, app_state);
+    //     return;
+    // }
     
     // Render based on focus
     match &mut app_state.focus {
