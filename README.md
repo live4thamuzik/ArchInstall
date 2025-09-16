@@ -1,4 +1,4 @@
-# 🚀 ArchInstall - Professional Arch Linux Installer
+# 🚀 ArchInstall - Arch Linux Installer
 
 > **A modern TUI-based Arch Linux installer with interactive package selection, Btrfs snapshots, and comprehensive system configuration.**
 
@@ -44,7 +44,7 @@ chmod +x *.sh
 
 ### Interactive Configuration
 - **Navigation**: Arrow keys to navigate, Enter to select
-- **Text Input**: Username, passwords, hostname with proper handling
+- **Text Input**: Username, passwords, hostname
 - **Popup Selections**: Disk, desktop environment, timezone, locale
 - **Auto-selection**: Display manager automatically selected based on DE
 
@@ -52,7 +52,7 @@ chmod +x *.sh
 - **Real-time Search**: `search <term>` to find packages
 - **Add/Remove**: `add <package>` and `remove <package>`
 - **AUR Support**: Search and install AUR packages with yay/paru
-- **Floating Windows**: Professional popup interface for package selection
+- **Floating Windows**: Popup interface for package selection
 
 ### Progress Tracking
 - **Live Updates**: Real-time progress bars during installation
