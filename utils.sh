@@ -296,7 +296,12 @@ get_device_type() {
         echo "nvme"
     elif echo "$dev_path" | grep -q "^/dev/sd[a-z]\+$"; then
         echo "sd"
+    elif echo "$dev_path" | grep -q "^/dev/hd[a-z]\+$"; then
+        echo "hd"  # Legacy IDE drives
+    elif echo "$dev_path" | grep -q "^/dev/vd[a-z]\+$"; then
+        echo "vd"  # Virtual drives (KVM, etc.)
     else
+        log_warn "Unknown device type for: $dev_path"
         echo "unknown"
     fi
 }
@@ -309,12 +314,16 @@ get_partition_path() {
     local full_path=""
 
     local dev_type=$(get_device_type "$base_disk")
+    log_info "Detected device type '$dev_type' for disk '$base_disk'"
+    
     if [ "$dev_type" == "nvme" ]; then
         full_path="${base_disk}p${part_num}"
-    elif [ "$dev_type" == "sd" ]; then
+        log_info "NVMe partition path: $full_path"
+    elif [ "$dev_type" == "sd" ] || [ "$dev_type" == "hd" ] || [ "$dev_type" == "vd" ]; then
         full_path="${base_disk}${part_num}"
+        log_info "SATA/IDE/Virtual partition path: $full_path"
     else
-        error_exit "Unsupported disk type for partition path construction: $base_disk."
+        error_exit "Unsupported disk type for partition path construction: $base_disk (type: $dev_type)."
     fi
     echo "$full_path"
 }
@@ -381,6 +390,125 @@ create_btrfs_subvolumes() {
     log_info "Created @var_cache subvolume"
     
     log_success "Btrfs subvolumes created successfully"
+}
+
+# Helper function to validate UUID format
+validate_uuid() {
+    local uuid="$1"
+    local context="$2"
+    
+    # Check if UUID is empty
+    if [ -z "$uuid" ]; then
+        log_error "UUID validation failed for $context: UUID is empty"
+        return 1
+    fi
+    
+    # Check UUID format (8-4-4-4-12 hexadecimal characters)
+    if ! echo "$uuid" | grep -qE '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
+        log_error "UUID validation failed for $context: Invalid UUID format: $uuid"
+        return 1
+    fi
+    
+    log_info "UUID validation passed for $context: $uuid"
+    return 0
+}
+
+# Helper function to validate device exists
+validate_device() {
+    local device="$1"
+    local context="$2"
+    
+    if [ -z "$device" ]; then
+        log_error "Device validation failed for $context: Device path is empty"
+        return 1
+    fi
+    
+    if [ ! -e "$device" ]; then
+        log_error "Device validation failed for $context: Device does not exist: $device"
+        return 1
+    fi
+    
+    log_info "Device validation passed for $context: $device"
+    return 0
+}
+
+# Helper function to verify critical mount points
+verify_critical_mounts() {
+    local context="$1"
+    local missing_mounts=()
+    
+    log_info "Verifying critical mount points for $context..."
+    
+    # Check root mount
+    if ! mountpoint -q "/mnt"; then
+        missing_mounts+=("/mnt (root)")
+    fi
+    
+    # Check EFI mount for UEFI systems
+    if [ "$BOOT_MODE" == "uefi" ] && ! mountpoint -q "/mnt/boot/efi"; then
+        missing_mounts+=("/mnt/boot/efi (EFI)")
+    fi
+    
+    # Check boot mount if separate boot partition exists
+    if [ -n "$PARTITION_UUIDS_BOOT_UUID" ] && ! mountpoint -q "/mnt/boot"; then
+        missing_mounts+=("/mnt/boot (boot)")
+    fi
+    
+    # Check home mount if separate home partition exists
+    if [ -n "$PARTITION_UUIDS_HOME_UUID" ] && ! mountpoint -q "/mnt/home"; then
+        missing_mounts+=("/mnt/home (home)")
+    fi
+    
+    if [ ${#missing_mounts[@]} -gt 0 ]; then
+        log_error "Critical mount points missing for $context:"
+        for mount in "${missing_mounts[@]}"; do
+            log_error "  - $mount"
+        done
+        return 1
+    fi
+    
+    log_info "All critical mount points verified for $context"
+    return 0
+}
+
+# Helper function to log UUID summary for debugging
+log_uuid_summary() {
+    local context="$1"
+    
+    log_info "=== UUID Summary for $context ==="
+    log_info "Boot Mode: $BOOT_MODE"
+    log_info "Encryption: $WANT_ENCRYPTION"
+    log_info "LVM: $WANT_LVM"
+    
+    if [ -n "$PARTITION_UUIDS_EFI_UUID" ]; then
+        log_info "EFI UUID: $PARTITION_UUIDS_EFI_UUID"
+    fi
+    
+    if [ -n "$PARTITION_UUIDS_BOOT_UUID" ]; then
+        log_info "Boot UUID: $PARTITION_UUIDS_BOOT_UUID"
+    fi
+    
+    if [ -n "$PARTITION_UUIDS_ROOT_UUID" ]; then
+        log_info "Root UUID: $PARTITION_UUIDS_ROOT_UUID"
+    fi
+    
+    if [ -n "$PARTITION_UUIDS_LUKS_CONTAINER_UUID" ]; then
+        log_info "LUKS Container UUID: $PARTITION_UUIDS_LUKS_CONTAINER_UUID"
+    fi
+    
+    if [ -n "$PARTITION_UUIDS_LV_ROOT_UUID" ]; then
+        log_info "LVM Root UUID: $PARTITION_UUIDS_LV_ROOT_UUID"
+    fi
+    
+    if [ -n "$PARTITION_UUIDS_HOME_UUID" ]; then
+        log_info "Home UUID: $PARTITION_UUIDS_HOME_UUID"
+    fi
+    
+    if [ -n "$VG_NAME" ]; then
+        log_info "Volume Group: $VG_NAME"
+    fi
+    
+    log_info "=== End UUID Summary ==="
 }
 
 # Safely mounts a device to a mount point.
@@ -976,15 +1104,39 @@ install_grub_chroot() {
     
     # Install GRUB bootloader (ArchL4TM approach)
     if [ "$BOOT_MODE" == "uefi" ]; then
-        # Simple UEFI installation (no --efi-directory, auto-detection)
-        grub-install --target=x86_64-efi --bootloader-id=grub_uefi --recheck || error_exit "GRUB EFI installation failed"
+        # UEFI installation with target, bootloader-id, and recheck flags
+        log_info "Installing GRUB for UEFI boot mode..."
+        if ! grub-install --target=x86_64-efi --bootloader-id=grub_uefi --recheck; then
+            log_error "GRUB EFI installation failed. This may be due to:"
+            log_error "  - EFI partition not properly mounted"
+            log_error "  - Insufficient space on EFI partition"
+            log_error "  - Hardware compatibility issues"
+            log_error "  - Missing GRUB EFI packages"
+            error_exit "GRUB EFI installation failed. Check the logs above for details."
+        fi
     else
         # BIOS installation
-        grub-install --target=i386-pc "$INSTALL_DISK" --recheck || error_exit "GRUB BIOS installation failed"
+        log_info "Installing GRUB for BIOS boot mode..."
+        if ! grub-install --target=i386-pc "$INSTALL_DISK" --recheck; then
+            log_error "GRUB BIOS installation failed. This may be due to:"
+            log_error "  - Invalid disk device: $INSTALL_DISK"
+            log_error "  - Disk not properly partitioned"
+            log_error "  - Hardware compatibility issues"
+            log_error "  - Missing GRUB BIOS packages"
+            error_exit "GRUB BIOS installation failed. Check the logs above for details."
+        fi
     fi
     
     # Generate GRUB configuration
-    grub-mkconfig -o /boot/grub/grub.cfg || error_exit "GRUB configuration generation failed"
+    log_info "Generating GRUB configuration..."
+    if ! grub-mkconfig -o /boot/grub/grub.cfg; then
+        log_error "GRUB configuration generation failed. This may be due to:"
+        log_error "  - Invalid kernel parameters in /etc/default/grub"
+        log_error "  - Missing kernel images"
+        log_error "  - Filesystem issues on /boot partition"
+        log_error "  - Permission problems"
+        error_exit "GRUB configuration generation failed. Check the logs above for details."
+    fi
     
     log_info "GRUB installed successfully."
 }
@@ -1238,20 +1390,28 @@ create_systemd_boot_entry() {
     # Get root partition UUID
     if [ "$WANT_LVM" == "yes" ]; then
         root_uuid="$PARTITION_UUIDS_LV_ROOT_UUID"
+        log_info "Using LVM root UUID: $root_uuid"
     else
         root_uuid="$PARTITION_UUIDS_ROOT_UUID"
+        log_info "Using direct root UUID: $root_uuid"
     fi
     
     if [ -z "$root_uuid" ]; then
         error_exit "Root partition UUID not found"
     fi
     
+    # Validate root UUID before using it
+    validate_uuid "$root_uuid" "GRUB root partition" || error_exit "Invalid root UUID for GRUB configuration"
+    
     # Build kernel command line
+    log_info "Building GRUB kernel command line with root=UUID=$root_uuid"
     cmdline_params="root=UUID=$root_uuid rw"
     
     # Add LUKS parameters if encryption is used
     if [ "$WANT_ENCRYPTION" == "yes" ] && [ -n "$PARTITION_UUIDS_LUKS_CONTAINER_UUID" ]; then
-        cmdline_params="$cmdline_params cryptdevice=UUID=$PARTITION_UUIDS_LUKS_CONTAINER_UUID:cryptroot"
+        validate_uuid "$PARTITION_UUIDS_LUKS_CONTAINER_UUID" "LUKS container" || error_exit "Invalid LUKS container UUID for GRUB configuration"
+        log_info "Adding LUKS cryptdevice parameter: UUID=$PARTITION_UUIDS_LUKS_CONTAINER_UUID:$VG_NAME"
+        cmdline_params="$cmdline_params cryptdevice=UUID=$PARTITION_UUIDS_LUKS_CONTAINER_UUID:$VG_NAME"
     fi
     
     # Add LVM parameters if LVM is used
@@ -1444,6 +1604,9 @@ configure_grub_theme_chroot() {
 # Adds LUKS, LVM, and other kernel parameters to GRUB configuration
 configure_grub_cmdline_chroot() {
     log_info "Configuring GRUB kernel command line..."
+    
+    # Log UUID summary for debugging
+    log_uuid_summary "GRUB kernel command line configuration"
     if [ "$BOOTLOADER_TYPE" == "grub" ]; then
         local cmdline_params=""
         local root_uuid=""
@@ -1451,20 +1614,28 @@ configure_grub_cmdline_chroot() {
         # Get root partition UUID
         if [ "$WANT_LVM" == "yes" ]; then
             root_uuid="$PARTITION_UUIDS_LV_ROOT_UUID"
+            log_info "Using LVM root UUID for systemd-boot: $root_uuid"
         else
             root_uuid="$PARTITION_UUIDS_ROOT_UUID"
+            log_info "Using direct root UUID for systemd-boot: $root_uuid"
         fi
         
         if [ -z "$root_uuid" ]; then
-            error_exit "Root partition UUID not found for GRUB configuration"
+            error_exit "Root partition UUID not found for systemd-boot configuration"
         fi
         
+        # Validate root UUID before using it
+        validate_uuid "$root_uuid" "systemd-boot root partition" || error_exit "Invalid root UUID for systemd-boot configuration"
+        
         # Add root parameter with UUID
+        log_info "Building systemd-boot kernel command line with root=UUID=$root_uuid"
         cmdline_params="root=UUID=$root_uuid rw"
         
         # Add LUKS parameters if encryption is used
         if [ "$WANT_ENCRYPTION" == "yes" ] && [ -n "$PARTITION_UUIDS_LUKS_CONTAINER_UUID" ]; then
-            cmdline_params="$cmdline_params cryptdevice=UUID=$PARTITION_UUIDS_LUKS_CONTAINER_UUID:cryptroot"
+            validate_uuid "$PARTITION_UUIDS_LUKS_CONTAINER_UUID" "LUKS container for systemd-boot" || error_exit "Invalid LUKS container UUID for systemd-boot configuration"
+            log_info "Adding LUKS cryptdevice parameter for systemd-boot: UUID=$PARTITION_UUIDS_LUKS_CONTAINER_UUID:$VG_NAME"
+            cmdline_params="$cmdline_params cryptdevice=UUID=$PARTITION_UUIDS_LUKS_CONTAINER_UUID:$VG_NAME"
         fi
         
         # Add LVM parameters if LVM is used
@@ -1675,7 +1846,15 @@ configure_desktop_environment_chroot() {
             log_info "Configuring Hyprland window manager..."
             # Create basic Hyprland configuration
             mkdir -p /home/"$MAIN_USERNAME"/.config/hypr
-            cat > /home/"$MAIN_USERNAME"/.config/hypr/hyprland.conf << 'EOF'
+            
+            # Determine numlock configuration based on user preference
+            local numlock_config=""
+            if [ "$WANT_NUMLOCK_ON_BOOT" == "yes" ]; then
+                numlock_config="    numlock_by_default = true"
+                log_info "Adding numlock configuration to Hyprland config"
+            fi
+            
+            cat > /home/"$MAIN_USERNAME"/.config/hypr/hyprland.conf << EOF
 # Basic Hyprland configuration
 # See https://wiki.hyprland.org/Getting-Started/Master-Tutorial/
 
@@ -1695,6 +1874,7 @@ input {
     touchpad {
         natural_scroll=no
     }
+$numlock_config
 
     sensitivity=0 # -1.0 - 1.0, 0 means no modification.
 }
@@ -2074,14 +2254,77 @@ search_aur_packages_chroot() {
 }
 
 # Configures numlock on boot inside chroot environment.
-# Global: WANT_NUMLOCK_ON_BOOT
-# Installs numlockx package for numlock functionality on boot
+# Global: WANT_NUMLOCK_ON_BOOT, WANT_AUR_HELPER, AUR_HELPER_CHOICE
+# Uses mkinitcpio-numlock (AUR package) for system-wide numlock support
 configure_numlock_chroot() {
     log_info "Configuring numlock on boot..."
     if [ "$WANT_NUMLOCK_ON_BOOT" == "yes" ]; then
-        install_packages_chroot "numlockx" || error_exit "numlockx installation failed"
-        # Add numlockx to autostart (this would need desktop-specific configuration)
-        log_info "numlockx installed - desktop-specific autostart configuration may be needed"
+        # Check if AUR helper is available for installing mkinitcpio-numlock
+        if [ "$WANT_AUR_HELPER" == "yes" ] && [ -n "$AUR_HELPER_CHOICE" ]; then
+            log_info "Installing mkinitcpio-numlock (AUR package) using $AUR_HELPER_CHOICE..."
+            
+            # Install mkinitcpio-numlock using the AUR helper
+            case "$AUR_HELPER_CHOICE" in
+                "yay")
+                    sudo -u "$MAIN_USERNAME" yay -S --noconfirm mkinitcpio-numlock || error_exit "mkinitcpio-numlock installation failed"
+                    ;;
+                "paru")
+                    sudo -u "$MAIN_USERNAME" paru -S --noconfirm mkinitcpio-numlock || error_exit "mkinitcpio-numlock installation failed"
+                    ;;
+                *)
+                    log_error "Unsupported AUR helper: $AUR_HELPER_CHOICE"
+                    error_exit "Cannot install mkinitcpio-numlock without supported AUR helper"
+                    ;;
+            esac
+            
+            log_info "Adding numlock hook to mkinitcpio configuration..."
+            # Add numlock hook to mkinitcpio.conf in the correct position
+            if ! grep -q "numlock" /etc/mkinitcpio.conf; then
+                # Get the current HOOKS line
+                local hooks_line=$(grep "^HOOKS=" /etc/mkinitcpio.conf)
+                if [ -n "$hooks_line" ]; then
+                    # Extract hooks from the line (remove HOOKS= and parentheses)
+                    local hooks_content=$(echo "$hooks_line" | sed 's/^HOOKS=(\(.*\))/\1/')
+                    log_info "Current hooks: $hooks_content"
+                    
+                    # Insert numlock in the optimal position
+                    # Priority: after autodetect, before block (for encrypted systems)
+                    # Fallback: after keyboard, before fsck
+                    if echo "$hooks_content" | grep -q "autodetect"; then
+                        # Insert after autodetect (good for most systems)
+                        hooks_content=$(echo "$hooks_content" | sed 's/\(autodetect\)/\1 numlock/')
+                        log_info "Inserted numlock after autodetect"
+                    elif echo "$hooks_content" | grep -q "keyboard"; then
+                        # Insert after keyboard (fallback)
+                        hooks_content=$(echo "$hooks_content" | sed 's/\(keyboard\)/\1 numlock/')
+                        log_info "Inserted numlock after keyboard"
+                    else
+                        # Insert after base udev (last resort)
+                        hooks_content=$(echo "$hooks_content" | sed 's/\(base udev\)/\1 numlock/')
+                        log_info "Inserted numlock after base udev"
+                    fi
+                    
+                    # Update the HOOKS line
+                    sed -i "s|^HOOKS=.*|HOOKS=($hooks_content)|" /etc/mkinitcpio.conf || error_exit "Failed to update HOOKS line in mkinitcpio.conf"
+                    log_info "Updated HOOKS line: HOOKS=($hooks_content)"
+                else
+                    error_exit "Could not find HOOKS line in mkinitcpio.conf"
+                fi
+            else
+                log_info "numlock hook already present in mkinitcpio.conf"
+            fi
+            
+            log_info "Regenerating initramfs with numlock support..."
+            mkinitcpio -P || error_exit "Failed to regenerate initramfs with numlock support"
+            
+            log_info "Numlock on boot configured successfully - will be enabled system-wide"
+        else
+            log_warn "AUR helper not available - cannot install mkinitcpio-numlock"
+            log_warn "Numlock on boot requires an AUR helper to install mkinitcpio-numlock"
+            log_warn "Please install an AUR helper (yay/paru) and mkinitcpio-numlock manually after installation"
+        fi
+    else
+        log_info "Numlock on boot not requested, skipping configuration"
     fi
     log_info "Numlock configuration complete."
 }

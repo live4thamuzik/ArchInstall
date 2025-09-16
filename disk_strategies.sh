@@ -225,7 +225,8 @@ do_auto_luks_lvm_partitioning() {
     part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
 
     # Perform LUKS encryption on this partition
-    local luks_name="lvm"
+    # Use the volume group name as the LUKS device name for consistency
+    local luks_name="$VG_NAME"
     encrypt_device "$part_dev" "$luks_name"
 
     # 5. Setup LVM on the encrypted device
@@ -296,7 +297,8 @@ do_auto_raid_luks_lvm_partitioning() {
 
 
     # --- Phase 3: Encrypt the RAID device (md_luks_container) ---
-    local luks_name="lvm"
+    # Use the volume group name as the LUKS device name for consistency
+    local luks_name="$VG_NAME"
     encrypt_device "$md_luks_container" "$luks_name"
 
 
