@@ -341,7 +341,7 @@ declare -a DESKTOP_ENVIRONMENT_OPTIONS=("none" "gnome" "kde" "hyprland")
 declare -a DISPLAY_MANAGER_OPTIONS=("none" "gdm" "sddm")
 
 # Plymouth Theme Options
-declare -a PLYMOUTH_THEME_OPTIONS=("arch-glow")
+declare -a PLYMOUTH_THEME_OPTIONS=("arch-glow" "arch-mac-style")
 
 # GRUB Theme Options
 declare -a GRUB_THEME_OPTIONS=(

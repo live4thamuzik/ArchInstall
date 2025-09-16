@@ -1302,31 +1302,52 @@ configure_plymouth_chroot() {
     fi
     
     # Install Arch Glow theme from Source directory
-    local theme_source="/Source/arch-glow"
-    local theme_dest="/usr/share/plymouth/themes/arch-glow"
+    local arch_glow_source="/Source/arch-glow"
+    local arch_glow_dest="/usr/share/plymouth/themes/arch-glow"
     
-    if [ -d "$theme_source" ]; then
+    if [ -d "$arch_glow_source" ]; then
         log_info "Installing Arch Glow Plymouth theme..."
-        mkdir -p "$theme_dest" || error_exit "Failed to create Plymouth themes directory"
+        mkdir -p "$arch_glow_dest" || error_exit "Failed to create Plymouth themes directory"
         
         # Copy all theme files
-        cp -r "$theme_source"/* "$theme_dest"/ || error_exit "Failed to copy Arch Glow theme"
+        cp -r "$arch_glow_source"/* "$arch_glow_dest"/ || error_exit "Failed to copy Arch Glow theme"
         
         # Set proper permissions for theme files
-        chmod -R 755 "$theme_dest" || log_warn "Failed to set theme permissions"
-        chmod 644 "$theme_dest"/*.png 2>/dev/null || log_warn "Failed to set image permissions"
-        chmod 644 "$theme_dest"/*.plymouth 2>/dev/null || log_warn "Failed to set plymouth file permissions"
-        chmod 755 "$theme_dest"/*.script 2>/dev/null || log_warn "Failed to set script permissions"
+        chmod -R 755 "$arch_glow_dest" || log_warn "Failed to set theme permissions"
+        chmod 644 "$arch_glow_dest"/*.png 2>/dev/null || log_warn "Failed to set image permissions"
+        chmod 644 "$arch_glow_dest"/*.plymouth 2>/dev/null || log_warn "Failed to set plymouth file permissions"
+        chmod 755 "$arch_glow_dest"/*.script 2>/dev/null || log_warn "Failed to set script permissions"
         
         # Ensure the main script is executable
-        if [ -f "$theme_dest/arch-glow.script" ]; then
-            chmod +x "$theme_dest/arch-glow.script" || log_warn "Failed to make arch-glow.script executable"
+        if [ -f "$arch_glow_dest/arch-glow.script" ]; then
+            chmod +x "$arch_glow_dest/arch-glow.script" || log_warn "Failed to make arch-glow.script executable"
             log_info "Made arch-glow.script executable"
         fi
         
-        log_info "Arch Glow theme installed successfully with $(ls -1 "$theme_dest"/*.png | wc -l) image files"
+        log_info "Arch Glow theme installed successfully with $(ls -1 "$arch_glow_dest"/*.png | wc -l) image files"
     else
-        log_warn "Arch Glow theme source not found at $theme_source"
+        log_warn "Arch Glow theme source not found at $arch_glow_source"
+    fi
+    
+    # Install Arch Mac Style theme from Source directory
+    local arch_mac_source="/Source/arch-mac-style"
+    local arch_mac_dest="/usr/share/plymouth/themes/arch-mac-style"
+    
+    if [ -d "$arch_mac_source" ]; then
+        log_info "Installing Arch Mac Style Plymouth theme..."
+        mkdir -p "$arch_mac_dest" || error_exit "Failed to create Plymouth themes directory"
+        
+        # Copy all theme files
+        cp -r "$arch_mac_source"/* "$arch_mac_dest"/ || error_exit "Failed to copy Arch Mac Style theme"
+        
+        # Set proper permissions for theme files
+        chmod -R 755 "$arch_mac_dest" || log_warn "Failed to set theme permissions"
+        chmod 644 "$arch_mac_dest"/*.png 2>/dev/null || log_warn "Failed to set image permissions"
+        chmod 644 "$arch_mac_dest"/*.plymouth 2>/dev/null || log_warn "Failed to set plymouth file permissions"
+        
+        log_info "Arch Mac Style theme installed successfully with $(ls -1 "$arch_mac_dest"/resources/*.png 2>/dev/null | wc -l) image files"
+    else
+        log_warn "Arch Mac Style theme source not found at $arch_mac_source"
     fi
     
     # Set Plymouth theme based on user choice
@@ -1357,23 +1378,27 @@ configure_grub_defaults_chroot() {
     log_info "Configuring GRUB defaults..."
     if [ "$BOOTLOADER_TYPE" == "grub" ]; then
         # Set GRUB timeout
-        edit_file_in_chroot "/etc/default/grub" "s/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=$GRUB_TIMEOUT_DEFAULT/"
+        sed -i "s/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=$GRUB_TIMEOUT_DEFAULT/" "/etc/default/grub"
         
         # Enable OS prober if requested
         if [ "$ENABLE_OS_PROBER" == "yes" ]; then
-            edit_file_in_chroot "/etc/default/grub" "s/^#GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/"
+            sed -i "s/^#GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/" "/etc/default/grub"
         fi
         
         # Enable cryptodisk support for encrypted systems (required before grub-install)
         if [ "$WANT_ENCRYPTION" == "yes" ]; then
             log_info "Enabling GRUB cryptodisk support for encrypted system..."
-            # Try to uncomment existing line first, then add if not found
+            # Since we're already in chroot, use direct sed commands instead of edit_file_in_chroot
             if grep -q "^#GRUB_ENABLE_CRYPTODISK=" "/etc/default/grub"; then
-                edit_file_in_chroot "/etc/default/grub" "s/^#GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=y/"
+                # Line is commented out - uncomment and set to y
+                sed -i "s/^#GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=y/" "/etc/default/grub"
+                log_info "Uncommented and set GRUB_ENABLE_CRYPTODISK=y"
             elif grep -q "^GRUB_ENABLE_CRYPTODISK=" "/etc/default/grub"; then
-                edit_file_in_chroot "/etc/default/grub" "s/^GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=y/"
+                # Line exists but might be set to something else - change to y
+                sed -i "s/^GRUB_ENABLE_CRYPTODISK=.*/GRUB_ENABLE_CRYPTODISK=y/" "/etc/default/grub"
+                log_info "Updated existing GRUB_ENABLE_CRYPTODISK=y"
             else
-                # Add the line if it doesn't exist
+                # Line doesn't exist - add it
                 echo "GRUB_ENABLE_CRYPTODISK=y" >> "/etc/default/grub"
                 log_info "Added GRUB_ENABLE_CRYPTODISK=y to /etc/default/grub"
             fi
@@ -1409,7 +1434,7 @@ configure_grub_theme_chroot() {
         esac
         
         # Set theme in GRUB config (regeneration happens in configure_grub_cmdline_chroot)
-        edit_file_in_chroot "/etc/default/grub" "s/^#GRUB_THEME=.*/GRUB_THEME=\"\/boot\/grub\/themes\/$theme_name\/theme.txt\"/"
+        sed -i "s/^#GRUB_THEME=.*/GRUB_THEME=\"\/boot\/grub\/themes\/$theme_name\/theme.txt\"/" "/etc/default/grub"
     fi
     log_info "GRUB theme configuration complete."
 }
@@ -1457,7 +1482,7 @@ configure_grub_cmdline_chroot() {
         fi
         
         if [ -n "$cmdline_params" ]; then
-            edit_file_in_chroot "/etc/default/grub" "s/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT=\"$cmdline_params\"/"
+            sed -i "s/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT=\"$cmdline_params\"/" "/etc/default/grub"
             grub-mkconfig -o /boot/grub/grub.cfg || error_exit "Failed to regenerate GRUB config with kernel parameters"
         fi
     fi
@@ -1830,7 +1855,7 @@ configure_mkinitcpio_hooks_chroot() {
     fi
     
     # Update mkinitcpio.conf
-    edit_file_in_chroot "/etc/mkinitcpio.conf" "s/^HOOKS=.*/HOOKS=\"$hooks\"/"
+    sed -i "s/^HOOKS=.*/HOOKS=\"$hooks\"/" "/etc/mkinitcpio.conf"
     
     # Regenerate initramfs (single regeneration for all hooks)
     mkinitcpio -P || error_exit "Failed to regenerate initramfs"
@@ -2089,7 +2114,7 @@ save_mdadm_conf_chroot() {
     log_info "Saving mdadm.conf for RAID arrays..."
     if [ "$WANT_RAID" == "yes" ]; then
         mdadm --detail --scan > /etc/mdadm.conf || error_exit "Failed to save mdadm.conf"
-        edit_file_in_chroot "/etc/mdadm.conf" "s/^#MAILADDR root@mydomain.tld/MAILADDR root/"
+        sed -i "s/^#MAILADDR root@mydomain.tld/MAILADDR root/" "/etc/mdadm.conf"
     fi
     log_info "mdadm.conf saved."
 }
