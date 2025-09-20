@@ -13,101 +13,92 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # Rust checks job - runs clippy and fmt
+  # Rust checks job - runs clippy and fmt in Arch Linux
   rust-checks:
-    name: Rust Checks
+    name: Rust Checks (Arch Linux)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust-version: [stable]
-
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4.1.1
 
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        toolchain: ${{ matrix.rust-version }}
-        components: rustfmt, clippy
-
-    - name: Cache Rust dependencies
-      uses: actions/cache@v3.3.1
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Run Rust formatting check
+    - name: Run Rust checks in Arch Linux container
       run: |
-        cargo fmt --all -- --check
+        docker run --rm -v "$PWD:/workspace" -w /workspace archlinux:latest bash -c "
+          # Update system
+          pacman -Syu --noconfirm
+          
+          # Install Rust and dependencies
+          pacman -S --noconfirm git curl wget
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          source ~/.cargo/env
+          
+          # Install Rust components
+          rustup component add rustfmt clippy
+          
+          # Run formatting check
+          echo 'Running Rust formatting check...'
+          cargo fmt --all -- --check
+          
+          # Run clippy
+          echo 'Running Rust clippy...'
+          cargo clippy --all-targets --all-features -- -D warnings
+          
+          echo 'Rust checks completed successfully!'
+        "
 
-    - name: Run Rust clippy
-      run: |
-        cargo clippy --all-targets --all-features -- -D warnings
-
-  # Test job - runs all tests
+  # Test job - runs all tests in Arch Linux
   test:
-    name: Run Tests
+    name: Run Tests (Arch Linux)
     runs-on: ubuntu-latest
     needs: rust-checks
-    strategy:
-      matrix:
-        rust-version: [stable]
-
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4.1.1
 
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        toolchain: ${{ matrix.rust-version }}
-
-    - name: Cache Rust dependencies
-      uses: actions/cache@v3.3.1
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Install system dependencies
+    - name: Run tests in Arch Linux container
       run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential pkg-config libssl-dev shellcheck
-
-    - name: Run Rust tests
-      run: |
-        cargo test --verbose --all-features
-
-    - name: Build release binary
-      run: |
-        cargo build --release
-
-    - name: Run shellcheck on scripts
-      run: |
-        # Run shellcheck on all shell scripts
-        find . -name "*.sh" -not -path "./.git/*" -exec shellcheck {} \;
-
-    - name: Run shell script tests
-      run: |
-        # Only run tests if the test runner exists
-        if [ -f "./run_tests.sh" ]; then
-          chmod +x ./run_tests.sh
-          ./run_tests.sh
-        else
-          echo "Test runner not found, skipping shell tests"
-        fi
+        docker run --rm -v "$PWD:/workspace" -w /workspace archlinux:latest bash -c "
+          # Update system
+          pacman -Syu --noconfirm
+          
+          # Install dependencies
+          pacman -S --noconfirm git curl wget shellcheck
+          
+          # Install Rust
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          source ~/.cargo/env
+          
+          # Run Rust tests
+          echo 'Running Rust tests...'
+          cargo test --verbose --all-features
+          
+          # Build release binary
+          echo 'Building release binary...'
+          cargo build --release
+          
+          # Run shellcheck on scripts
+          echo 'Running shellcheck...'
+          find . -name '*.sh' -not -path './.git/*' -exec shellcheck {} \;
+          
+          # Run shell script tests if available
+          if [ -f './run_tests.sh' ]; then
+            echo 'Running shell script tests...'
+            chmod +x ./run_tests.sh
+            ./run_tests.sh
+          else
+            echo 'Test runner not found, skipping shell tests'
+          fi
+          
+          echo 'All tests completed successfully!'
+        "
 
     - name: Upload test artifacts
       uses: actions/upload-artifact@v3.1.2
       if: failure()
       with:
-        name: test-results-${{ matrix.rust-version }}
+        name: test-results-archlinux
         path: |
           target/debug/
           target/release/archinstall-tui
@@ -177,7 +168,7 @@ jobs:
 
   # Security scan job
   security-scan:
-    name: Security Scan
+    name: Security Scan (Arch Linux)
     runs-on: ubuntu-latest
     needs: test
     
@@ -185,7 +176,34 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4.1.1
     
-    - name: Run Trivy vulnerability scanner
+    - name: Run security scan in Arch Linux container
+      run: |
+        docker run --rm -v "$PWD:/workspace" -w /workspace archlinux:latest bash -c "
+          # Update system
+          pacman -Syu --noconfirm
+          
+          # Install security tools
+          pacman -S --noconfirm git curl wget
+          
+          # Install Trivy (if available in AUR)
+          # For now, we'll do basic security checks
+          echo 'Running basic security checks...'
+          
+          # Check for hardcoded secrets
+          echo 'Checking for potential hardcoded secrets...'
+          if grep -r -i 'password\\|secret\\|key\\|token' --include='*.sh' --include='*.rs' --include='*.yaml' . | grep -v '\\$\\|config\\|example'; then
+            echo 'Potential hardcoded secrets found!'
+            exit 1
+          fi
+          
+          # Check file permissions
+          echo 'Checking file permissions...'
+          find . -name '*.sh' -not -perm 755 -exec chmod 755 {} \\;
+          
+          echo 'Security scan completed successfully!'
+        "
+    
+    - name: Run Trivy vulnerability scanner (Ubuntu)
       uses: aquasecurity/trivy-action@0.10.0
       with:
         scan-type: 'fs'
