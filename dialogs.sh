@@ -252,7 +252,7 @@ configure_wifi_live_dialog() {
 
     local wifi_device=""
     if [ $(echo "$wifi_devices" | wc -w) -gt 1 ]; then
-        local wifi_dev_options=($(echo "$wifi_devices"))
+mapfile -t         local wifi_dev_options < <(echo "$wifi_devices")
         select_option "Select Wi-Fi device:" wifi_dev_options wifi_device || return 1
     else
         wifi_device="$wifi_devices"
@@ -268,7 +268,7 @@ configure_wifi_live_dialog() {
         log_warn "No Wi-Fi networks found. Try scanning again or check surroundings."
         return 0
     fi
-    local network_options=($(echo "$networks"))
+mapfile -t     local network_options < <(echo "$networks")
     local selected_ssid=""
     select_option "Select Wi-Fi network (SSID):" network_options selected_ssid || return 1
 
@@ -368,7 +368,7 @@ gather_installation_details() {
     fi
 
     # Select primary installation disk.
-    local available_disks=($(get_available_disks))
+mapfile -t     local available_disks < <(get_available_disks)
     if [ ${#available_disks[@]} -eq 0 ]; then
         error_exit "No suitable disks found for installation. Exiting."
     fi
@@ -630,7 +630,7 @@ gather_installation_details() {
     fi
 
     # Get all timezones for the selected region
-    local region_timezones=($(get_timezones_in_region "$selected_region"))
+mapfile -t     local region_timezones < <(get_timezones_in_region "$selected_region")
     
     if [ ${#region_timezones[@]} -eq 0 ]; then
         error_exit "No timezones found for region '$selected_region'"

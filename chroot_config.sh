@@ -21,6 +21,7 @@ source ./disk_strategies.sh
 source ./dialogs.sh
 
 # Load YAML configuration
+# Note: load_yaml_config is defined in yaml_parser.sh which is sourced above
 load_yaml_config "config.yaml" || _log_error "Failed to load YAML configuration in chroot"
 
 # Restore passed values so config defaults do not overwrite them

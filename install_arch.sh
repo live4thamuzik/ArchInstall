@@ -289,26 +289,11 @@ export_chroot_variables() {
 
 # Phase 5: Execute chroot configuration
 phase_chroot_execution() {
+    log_info "Starting chroot execution phase..."
+    
     # Ensure EFI partition is properly mounted before chroot
     if [ "$BOOT_MODE" == "uefi" ]; then
-        log_info "Verifying EFI partition is properly mounted before chroot..."
-        if ! mountpoint -q "/mnt/boot/efi"; then
-            log_error "EFI partition not mounted at /mnt/boot/efi. Attempting to remount..."
-            if [ -n "${PARTITION_UUIDS_EFI_UUID:-}" ]; then
-                local efi_dev="/dev/disk/by-uuid/$PARTITION_UUIDS_EFI_UUID"
-                if [ -b "$efi_dev" ]; then
-                    log_info "Creating /mnt/boot/efi directory..."
-                    mkdir -p "/mnt/boot/efi" || error_exit "Failed to create /mnt/boot/efi directory"
-                    log_info "Remounting EFI partition from UUID: $efi_dev"
-                    mount -t vfat -o rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro "$efi_dev" "/mnt/boot/efi" || error_exit "Failed to remount EFI partition"
-                else
-                    error_exit "EFI partition device not found: $efi_dev"
-                fi
-            else
-                error_exit "EFI partition UUID not available for remounting"
-            fi
-        fi
-        log_info "EFI partition verified and mounted at /mnt/boot/efi"
+        verify_efi_mount_for_chroot
     fi
 
     echo "Running chroot config..."
@@ -318,8 +303,51 @@ phase_chroot_execution() {
     verify_critical_mounts "chroot configuration" || error_exit "Critical mount points verification failed"
     
     # Create environment file to avoid command line length limits
+    create_chroot_environment_file
+    
+    # Execute chroot configuration with environment file
+    execute_chroot_configuration
+    
+    log_info "Chroot execution phase completed successfully"
+}
+
+# --- Helper Functions for Chroot Operations ---
+
+# Verify EFI partition is properly mounted for chroot operations
+verify_efi_mount_for_chroot() {
+    log_info "Verifying EFI partition is properly mounted before chroot..."
+    
+    if ! mountpoint -q "/mnt/boot/efi"; then
+        log_error "EFI partition not mounted at /mnt/boot/efi. Attempting to remount..."
+        
+        if [ -n "${PARTITION_UUIDS_EFI_UUID:-}" ]; then
+            local efi_dev="/dev/disk/by-uuid/$PARTITION_UUIDS_EFI_UUID"
+            if [ -b "$efi_dev" ]; then
+                log_info "Creating /mnt/boot/efi directory..."
+                if ! mkdir -p "/mnt/boot/efi"; then
+                    error_exit "Failed to create /mnt/boot/efi directory"
+                fi
+                
+                log_info "Remounting EFI partition from UUID: $efi_dev"
+                if ! mount -t vfat -o rw,relatime,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro "$efi_dev" "/mnt/boot/efi"; then
+                    error_exit "Failed to remount EFI partition"
+                fi
+            else
+                error_exit "EFI partition device not found: $efi_dev"
+            fi
+        else
+            error_exit "EFI partition UUID not available for remounting"
+        fi
+    fi
+    
+    log_info "EFI partition verified and mounted at /mnt/boot/efi"
+}
+
+# Create environment file for chroot operations
+create_chroot_environment_file() {
     log_info "Creating environment file for chroot..."
-    cat > /mnt/tmp/chroot_env.sh << EOF
+    
+    if ! cat > /mnt/tmp/chroot_env.sh << EOF
 #!/bin/bash
 # Environment variables for chroot configuration
 export LOG_FILE='$LOG_FILE'
@@ -390,9 +418,22 @@ export PARTITION_UUIDS_LV_SWAP_UUID='$PARTITION_UUIDS_LV_SWAP_UUID'
 export PARTITION_UUIDS_LV_HOME_UUID='$PARTITION_UUIDS_LV_HOME_UUID'
 export VG_NAME='$VG_NAME'
 EOF
+    then
+        error_exit "Failed to create chroot environment file"
+    fi
     
-    # Execute chroot configuration with environment file
+    log_info "Chroot environment file created successfully"
+}
+
+# Execute chroot configuration with comprehensive error handling
+execute_chroot_configuration() {
     log_info "Starting chroot configuration..."
+    
+    # Verify chroot environment before execution
+    verify_chroot_environment
+    
+    # Execute chroot configuration with comprehensive error handling
+    log_info "Executing chroot configuration script..."
     if ! arch-chroot /mnt /bin/bash -c "source /tmp/chroot_env.sh && ./chroot_config.sh"; then
         local exit_code=$?
         log_error "Chroot configuration failed with exit code: $exit_code"
@@ -401,11 +442,42 @@ EOF
         log_error "  - Invalid environment variables"
         log_error "  - Failed system configuration steps"
         log_error "  - Insufficient permissions in chroot environment"
+        log_error "  - Network connectivity issues inside chroot"
+        log_error "  - Package installation failures"
+        log_error "  - Bootloader installation failures"
+        log_error ""
+        log_error "Troubleshooting steps:"
+        log_error "  1. Check chroot logs: cat /mnt/var/log/archinstall-chroot.log"
+        log_error "  2. Verify script permissions: ls -la /mnt/*.sh"
+        log_error "  3. Check environment file: cat /mnt/tmp/chroot_env.sh"
+        log_error "  4. Test chroot access: arch-chroot /mnt /bin/bash"
+        log_error "  5. Verify mount points: mount | grep /mnt"
+        log_error ""
         log_error "Check the chroot logs at /mnt/var/log/archinstall-chroot.log for details"
         error_exit "Chroot configuration failed."
     fi
+    
     log_info "Chroot setup complete."
     echo "System configuration complete"
+}
+
+# Verify chroot environment is ready for execution
+verify_chroot_environment() {
+    log_info "Verifying chroot environment..."
+    
+    if ! mountpoint -q /mnt; then
+        error_exit "Root filesystem not mounted at /mnt. Cannot proceed with chroot configuration."
+    fi
+    
+    if [ ! -f "/mnt/chroot_config.sh" ]; then
+        error_exit "chroot_config.sh not found in /mnt. Cannot proceed with chroot configuration."
+    fi
+    
+    if [ ! -f "/mnt/tmp/chroot_env.sh" ]; then
+        error_exit "chroot environment file not found in /mnt/tmp. Cannot proceed with chroot configuration."
+    fi
+    
+    log_info "Chroot environment verification completed successfully"
 }
 
 # Phase 6: Finalization and cleanup
@@ -522,7 +594,8 @@ install_base_system_target() {
 
     log_info "Pacstrap essentials: $essential_packages"
     
-    # Enhanced error handling for pacstrap
+    # Enhanced error handling for pacstrap with detailed troubleshooting
+    log_info "Installing essential packages: $essential_packages"
     if ! pacstrap -K /mnt $essential_packages --noconfirm --needed; then
         local exit_code=$?
         log_error "Pacstrap failed with exit code: $exit_code"
@@ -532,6 +605,16 @@ install_base_system_target() {
         log_error "  - Invalid mirror configuration"
         log_error "  - Insufficient disk space in /mnt"
         log_error "  - Corrupted package database"
+        log_error "  - Package conflicts or dependency issues"
+        log_error "  - Invalid package names in the list"
+        log_error ""
+        log_error "Troubleshooting steps:"
+        log_error "  1. Check network connectivity: ping archlinux.org"
+        log_error "  2. Verify mirror configuration: reflector --list"
+        log_error "  3. Check available disk space: df -h /mnt"
+        log_error "  4. Update package database: pacman -Sy"
+        log_error "  5. Try installing packages individually to identify the problematic package"
+        log_error ""
         log_error "Please check your network connection and try again"
         error_exit "Pacstrap failed to install essential base system."
     fi

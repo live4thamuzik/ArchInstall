@@ -1,6 +1,58 @@
 #!/bin/bash
 # disk_strategies.sh - Contains specific partitioning/storage layout functions
 
+# --- Partition Configuration Constants ---
+# These constants replace magic strings throughout the partitioning functions
+# for better readability and maintainability
+
+# Partition Types (GPT codes)
+readonly EFI_PARTITION_TYPE="EF00"
+# shellcheck disable=SC2034
+readonly LINUX_PARTITION_TYPE="8300"
+# shellcheck disable=SC2034
+readonly LVM_PARTITION_TYPE="8E00"
+# shellcheck disable=SC2034
+readonly LUKS_PARTITION_TYPE="8309"
+readonly SWAP_PARTITION_TYPE="8200"
+
+# Partition Names
+# shellcheck disable=SC2034
+readonly EFI_PARTITION_NAME="EFI System Partition"
+# shellcheck disable=SC2034
+readonly LINUX_PARTITION_NAME="Linux filesystem"
+# shellcheck disable=SC2034
+readonly LVM_PARTITION_NAME="Linux LVM"
+# shellcheck disable=SC2034
+readonly LUKS_PARTITION_NAME="Linux LUKS"
+# shellcheck disable=SC2034
+readonly SWAP_PARTITION_NAME="Linux swap"
+
+# Default Partition Sizes (in MiB)
+readonly DEFAULT_SWAP_SIZE_MIB=2048
+readonly DEFAULT_ROOT_SIZE_MIB=102400
+
+# Filesystem Types
+# shellcheck disable=SC2034
+readonly DEFAULT_ROOT_FILESYSTEM="ext4"
+# shellcheck disable=SC2034
+readonly DEFAULT_HOME_FILESYSTEM="ext4"
+# shellcheck disable=SC2034
+readonly EFI_FILESYSTEM="vfat"
+# shellcheck disable=SC2034
+readonly BOOT_FILESYSTEM="ext4"
+
+# RAID Device Names
+# shellcheck disable=SC2034
+readonly RAID_BOOT_DEVICE="/dev/md0"
+# shellcheck disable=SC2034
+readonly RAID_ROOT_DEVICE="/dev/md1"
+# shellcheck disable=SC2034
+readonly RAID_HOME_DEVICE="/dev/md2"
+# shellcheck disable=SC2034
+readonly RAID_LVM_DEVICE="/dev/md1"
+# shellcheck disable=SC2034
+readonly RAID_LUKS_DEVICE="/dev/md1"
+
 # --- Main Dispatcher for Disk Strategy ---
 execute_disk_strategy() {
     log_info "Executing disk strategy: $PARTITION_SCHEME"
@@ -101,7 +153,7 @@ do_auto_simple_partitioning() {
         log_info "Creating EFI partition (${EFI_PART_SIZE_MIB}MiB)..."
         # Create EFI partition with sgdisk: -n 1:0:+size -t 1:EF00
         local efi_size_mb="${EFI_PART_SIZE_MIB}M"
-        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:EF00" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
+        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:$EFI_PARTITION_TYPE" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
         partprobe "$INSTALL_DISK"
         part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
         
@@ -121,10 +173,10 @@ do_auto_simple_partitioning() {
     if [ "$WANT_SWAP" == "yes" ]; then
         log_info "Creating Swap partition..."
         # Use an appropriate size for swap
-        local swap_size_mib=$((2048)) # Defaulting to 2 GiB for a reasonable swap partition
+        local swap_size_mib=$DEFAULT_SWAP_SIZE_MIB # Defaulting to 2 GiB for a reasonable swap partition
         local swap_size_mb="${swap_size_mib}M"
         if [ "$BOOT_MODE" == "uefi" ]; then
-            sgdisk -n "$part_num:0:+$swap_size_mb" -t "$part_num:8200" "$INSTALL_DISK" || error_exit "Failed to create swap partition."
+            sgdisk -n "$part_num:0:+$swap_size_mb" -t "$part_num:$SWAP_PARTITION_TYPE" "$INSTALL_DISK" || error_exit "Failed to create swap partition."
         else
             # For BIOS, use fdisk for swap partition
             printf "n\np\n$part_num\n\n+${swap_size_mib}M\nt\n$part_num\n82\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create swap partition."
@@ -139,7 +191,7 @@ do_auto_simple_partitioning() {
     fi
 
     # Root Partition and Optional Home Partition
-    local root_size_mib=$((102400)) # Defaulting to 100 GiB for a reasonable root partition
+    local root_size_mib=$DEFAULT_ROOT_SIZE_MIB # Defaulting to 100 GiB for a reasonable root partition
     
     # Set default filesystem types if not specified
     ROOT_FILESYSTEM_TYPE="${ROOT_FILESYSTEM_TYPE:-ext4}"
@@ -252,7 +304,7 @@ do_auto_luks_lvm_partitioning() {
         log_info "Creating EFI partition (${EFI_PART_SIZE_MIB}MiB)..."
         # Create EFI partition with sgdisk: -n 1:0:+size -t 1:EF00
         local efi_size_mb="${EFI_PART_SIZE_MIB}M"
-        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:EF00" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
+        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:$EFI_PARTITION_TYPE" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
         partprobe "$INSTALL_DISK"
         part_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
         
@@ -340,7 +392,7 @@ do_auto_raid_luks_lvm_partitioning() {
     local md_boot_dev="/dev/md0"
     local boot_component_devices=()
     for disk in "${RAID_DEVICES[@]}"; do
-        boot_component_devices+=($(get_partition_path "$disk" "$boot_part_num"))
+mapfile -t         boot_component_devices+ < <(get_partition_path "$disk" "$boot_part_num")
     done
     setup_raid "$RAID_LEVEL" "$md_boot_dev" "${boot_component_devices[@]}" || error_exit "RAID setup for /boot failed."
     format_filesystem "$md_boot_dev" "ext4"
@@ -353,7 +405,7 @@ do_auto_raid_luks_lvm_partitioning() {
     local md_luks_container="/dev/md1"
     local luks_component_devices=()
     for disk in "${RAID_DEVICES[@]}"; do
-        luks_component_devices+=($(get_partition_path "$disk" "$luks_part_num"))
+mapfile -t         luks_component_devices+ < <(get_partition_path "$disk" "$luks_part_num")
     done
     setup_raid "$RAID_LEVEL" "$md_luks_container" "${luks_component_devices[@]}" || error_exit "RAID setup for LUKS container failed."
 
@@ -403,7 +455,7 @@ do_auto_simple_luks_partitioning() {
     if [ "$BOOT_MODE" == "uefi" ]; then
         log_info "Creating EFI partition (${EFI_PART_SIZE_MIB}MiB)..."
         local efi_size_mb="${EFI_PART_SIZE_MIB}M"
-        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:EF00" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
+        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:$EFI_PARTITION_TYPE" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
         partprobe "$INSTALL_DISK"
         local efi_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
         mkfs.fat -F32 "$efi_dev" || error_exit "Failed to format EFI partition."
@@ -486,7 +538,7 @@ do_auto_lvm_partitioning() {
     if [ "$BOOT_MODE" == "uefi" ]; then
         log_info "Creating EFI partition (${EFI_PART_SIZE_MIB}MiB)..."
         local efi_size_mb="${EFI_PART_SIZE_MIB}M"
-        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:EF00" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
+        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:$EFI_PARTITION_TYPE" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
         partprobe "$INSTALL_DISK"
         local efi_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
         mkfs.fat -F32 "$efi_dev" || error_exit "Failed to format EFI partition."
@@ -639,7 +691,7 @@ do_auto_raid_simple_partitioning() {
     local md_boot_dev="/dev/md0"
     local boot_component_devices=()
     for disk in "${RAID_DEVICES[@]}"; do
-        boot_component_devices+=($(get_partition_path "$disk" "$boot_part_num"))
+mapfile -t         boot_component_devices+ < <(get_partition_path "$disk" "$boot_part_num")
     done
     setup_raid "$raid_level" "$md_boot_dev" "${boot_component_devices[@]}" || error_exit "RAID setup for /boot failed."
     format_filesystem "$md_boot_dev" "ext4"
@@ -651,7 +703,7 @@ do_auto_raid_simple_partitioning() {
     local md_root_dev="/dev/md1"
     local root_component_devices=()
     for disk in "${RAID_DEVICES[@]}"; do
-        root_component_devices+=($(get_partition_path "$disk" "$root_part_num"))
+mapfile -t         root_component_devices+ < <(get_partition_path "$disk" "$root_part_num")
     done
     setup_raid "$raid_level" "$md_root_dev" "${root_component_devices[@]}" || error_exit "RAID setup for root failed."
     format_filesystem "$md_root_dev" "$ROOT_FILESYSTEM_TYPE"
@@ -663,7 +715,7 @@ do_auto_raid_simple_partitioning() {
         local md_home_dev="/dev/md2"
         local home_component_devices=()
         for disk in "${RAID_DEVICES[@]}"; do
-            home_component_devices+=($(get_partition_path "$disk" "$home_part_num"))
+mapfile -t             home_component_devices+ < <(get_partition_path "$disk" "$home_part_num")
         done
         setup_raid "$raid_level" "$md_home_dev" "${home_component_devices[@]}" || error_exit "RAID setup for home failed."
         format_filesystem "$md_home_dev" "$HOME_FILESYSTEM_TYPE"
@@ -738,7 +790,7 @@ do_auto_raid_lvm_partitioning() {
     local md_boot_dev="/dev/md0"
     local boot_component_devices=()
     for disk in "${RAID_DEVICES[@]}"; do
-        boot_component_devices+=($(get_partition_path "$disk" "$boot_part_num"))
+mapfile -t         boot_component_devices+ < <(get_partition_path "$disk" "$boot_part_num")
     done
     setup_raid "$raid_level" "$md_boot_dev" "${boot_component_devices[@]}" || error_exit "RAID setup for /boot failed."
     format_filesystem "$md_boot_dev" "ext4"
@@ -750,7 +802,7 @@ do_auto_raid_lvm_partitioning() {
     local md_lvm_dev="/dev/md1"
     local lvm_component_devices=()
     for disk in "${RAID_DEVICES[@]}"; do
-        lvm_component_devices+=($(get_partition_path "$disk" "$lvm_part_num"))
+mapfile -t         lvm_component_devices+ < <(get_partition_path "$disk" "$lvm_part_num")
     done
     setup_raid "$raid_level" "$md_lvm_dev" "${lvm_component_devices[@]}" || error_exit "RAID setup for LVM container failed."
 
@@ -857,3 +909,22 @@ do_manual_partitioning_guided() {
 
     log_info "UUID capture for manual setup attempted. Please verify fstab and bootloader configs post-install."
 }
+
+# Export constants that might be used by other scripts
+export LINUX_PARTITION_TYPE
+export LVM_PARTITION_TYPE
+export LUKS_PARTITION_TYPE
+export EFI_PARTITION_NAME
+export LINUX_PARTITION_NAME
+export LVM_PARTITION_NAME
+export LUKS_PARTITION_NAME
+export SWAP_PARTITION_NAME
+export DEFAULT_ROOT_FILESYSTEM
+export DEFAULT_HOME_FILESYSTEM
+export EFI_FILESYSTEM
+export BOOT_FILESYSTEM
+export RAID_BOOT_DEVICE
+export RAID_ROOT_DEVICE
+export RAID_HOME_DEVICE
+export RAID_LVM_DEVICE
+export RAID_LUKS_DEVICE

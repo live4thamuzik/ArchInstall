@@ -956,7 +956,7 @@ install_time_sync_chroot() {
             log_info "Installing Chrony for time synchronization..."
             install_packages_chroot chrony ;;
         systemd-timesyncd)
-            log_info "Using systemd-timesyncd (already part of systemd), no package install needed." ;;
+            log_info "Using systemd-timesyncd (already part of systemd), no package install needed."  || exit;;
         *)
             log_warn "Unknown TIME_SYNC_CHOICE '$TIME_SYNC_CHOICE'. Skipping time sync package install." ;;
     esac
@@ -2458,17 +2458,17 @@ install_aur_helper_chroot() {
             "yay")
                 # Clone and build yay as the main user
                 sudo -u "$MAIN_USERNAME" git clone https://aur.archlinux.org/yay.git "$build_dir/yay" || error_exit "Failed to clone yay"
-                cd "$build_dir/yay"
+                cd "$build_dir/yay" || exit || exit
                 sudo -u "$MAIN_USERNAME" makepkg -si --noconfirm || error_exit "Failed to build yay"
-                cd /
+                cd / || exit
                 rm -rf "$build_dir/yay"
                 ;;
             "paru")
                 # Clone and build paru as the main user
                 sudo -u "$MAIN_USERNAME" git clone https://aur.archlinux.org/paru.git "$build_dir/paru" || error_exit "Failed to clone paru"
-                cd "$build_dir/paru"
+                cd "$build_dir/paru" || exit || exit
                 sudo -u "$MAIN_USERNAME" makepkg -si --noconfirm || error_exit "Failed to build paru"
-                cd /
+                cd / || exit
                 rm -rf "$build_dir/paru"
                 ;;
         esac
@@ -3111,3 +3111,13 @@ update_sudoers() {
     log_success "sudoers file configured successfully"
     return 0
 }
+
+# Export variables that might be used by other scripts
+export PARTITION_UUIDS_EFI_PARTUUID
+export PARTITION_UUIDS_SWAP_UUID
+export PARTITION_UUIDS_LV_SWAP_UUID
+export PARTITION_UUIDS_LV_HOME_UUID
+export LUKS_CRYPTROOT_DEV
+export LV_ROOT_PATH
+export LV_SWAP_PATH
+export LV_HOME_PATH

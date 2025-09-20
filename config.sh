@@ -117,19 +117,32 @@ readonly EFI_PART_SIZE_MIB=1024
 readonly BOOT_PART_SIZE_MIB=2048
 
 # --- Installation Parameters (Populated by dialogs.sh or defaults) ---
+# shellcheck disable=SC2034
 INSTALL_DISK=""               # Primary disk selected by user (e.g., /dev/sda). Blank initially.
+# shellcheck disable=SC2034
 OVERRIDE_BOOT_MODE="no"       # "yes" if user forces BIOS mode. Default to "no".
+# shellcheck disable=SC2034
 BOOT_MODE="uefi"              # "uefi" or "bios" (auto-detected, can be overridden). Default to "uefi".
+# shellcheck disable=SC2034
 WANT_WIFI_CONNECTION="no"     # "yes" or "no". Default to "no".
 
+# shellcheck disable=SC2034
 PARTITION_SCHEME=""           # e.g., "auto_simple", "auto_luks_lvm", "auto_raid_luks_lvm", "manual". Blank initially.
+# shellcheck disable=SC2034
 WANT_SWAP="no"                # "yes" or "no". Default to "no".
+# shellcheck disable=SC2034
 WANT_HOME_PARTITION="no"      # "yes" or "no". Default to "no".
+# shellcheck disable=SC2034
 WANT_ENCRYPTION="no"          # "yes" or "no" (implied by scheme). Default to "no".
+# shellcheck disable=SC2034
 WANT_LVM="no"                 # "yes" or "no" (implied by scheme). Default to "no".
+# shellcheck disable=SC2034
 WANT_RAID="no"                # "yes" or "no" (implied by scheme). Default to "no".
+# shellcheck disable=SC2034
 LUKS_PASSPHRASE=""            # Populated by secure_password_input. Blank initially.
+# shellcheck disable=SC2034
 RAID_LEVEL=""                 # e.g., "1", "5". Blank initially.
+# shellcheck disable=SC2034
 RAID_DEVICES=()               # Array of disks for RAID, if applicable. Empty initially.
 
 # Default Partition Sizes (for auto-partitioning schemes) - in MiB for parted calculations
@@ -139,7 +152,9 @@ RAID_DEVICES=()               # Array of disks for RAID, if applicable. Empty in
 ROOT_FILESYSTEM_TYPE="ext4"   # Default FS for root, will be overridden by prompt
 HOME_FILESYSTEM_TYPE="ext4"   # Default FS for /home, will be overridden by prompt
 
+# shellcheck disable=SC2034
 KERNEL_TYPE="linux"           # "linux" or "linux-lts". Default to "linux".
+# shellcheck disable=SC2034
 CPU_MICROCODE_TYPE="none"     # "intel", "amd", or "none" (auto-detected). Default to "none".
 
 TIMEZONE_DEFAULT="America/New_York" # Default timezone
@@ -150,11 +165,15 @@ KEYMAP="us"                   # Default console keymap.
 REFLECTOR_COUNTRY_CODE="US"   # Default country for reflector mirrors.
 
 SYSTEM_HOSTNAME=""            # Populated by dialogs.sh. Blank initially.
+# shellcheck disable=SC2034
 ROOT_PASSWORD=""              # Populated by dialogs.sh (securely handled). Blank initially.
+# shellcheck disable=SC2034
 MAIN_USERNAME=""              # Populated by dialogs.sh. Blank initially.
+# shellcheck disable=SC2034
 MAIN_USER_PASSWORD=""         # Populated by dialogs.sh. Blank initially.
 
 # --- Boot Configuration ---
+# shellcheck disable=SC2034
 BOOTLOADER_TYPE="grub"        # "grub" or "systemd-boot". Default to "grub".
 ENABLE_OS_PROBER="no"         # "yes" or "no" (for GRUB dual-boot). Default to "no".
 WANT_SECURE_BOOT="no"         # "yes" or "no". Default to "no".
@@ -484,3 +503,27 @@ DEFAULT_LV_MOUNTPOINTS_LV_HOME="/mnt/home"
 DEFAULT_LV_FSTYPES_LV_ROOT="$ROOT_FILESYSTEM_TYPE"
 DEFAULT_LV_FSTYPES_LV_SWAP="swap"
 DEFAULT_LV_FSTYPES_LV_HOME="$HOME_FILESYSTEM_TYPE"
+
+# Export variables that are used by other scripts
+export GRUB_TIMEOUT_DEFAULT
+export EFI_PART_SIZE_MIB
+export BOOT_PART_SIZE_MIB
+export INSTALL_DISK
+export OVERRIDE_BOOT_MODE
+export BOOT_MODE
+export WANT_WIFI_CONNECTION
+export PARTITION_SCHEME
+export WANT_SWAP
+export WANT_HOME_PARTITION
+export WANT_ENCRYPTION
+export WANT_LVM
+export WANT_RAID
+export LUKS_PASSPHRASE
+export RAID_LEVEL
+export RAID_DEVICES
+export KERNEL_TYPE
+export CPU_MICROCODE_TYPE
+export ROOT_PASSWORD
+export MAIN_USERNAME
+export MAIN_USER_PASSWORD
+export BOOTLOADER_TYPE
