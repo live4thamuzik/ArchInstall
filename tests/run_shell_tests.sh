@@ -1,7 +1,7 @@
 #!/bin/bash
 # run_shell_tests.sh - Comprehensive shell script test runner
 
-set -euo pipefail
+set -uo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -24,8 +24,8 @@ run_test_file() {
     
     print_status $BLUE "Running $test_name tests..."
     
-    # Source the test framework and run the test file
-    if bash -c "cd '$(dirname "$0")' && source test_framework.sh && source '$(basename "$test_file")'"; then
+    # Run the test file directly using the test framework
+    if bash -c "cd '$(dirname "$0")' && bash test_framework.sh '$(basename "$test_file")'"; then
         print_status $GREEN "✅ $test_name tests completed"
         return 0
     else
@@ -37,6 +37,10 @@ run_test_file() {
 # Function to run all shell tests
 run_all_shell_tests() {
     local test_dir="$(dirname "$0")"
+    # If we're running from the root directory, adjust the path
+    if [ "$test_dir" = "./tests" ]; then
+        test_dir="tests"
+    fi
     local exit_code=0
     local tests_run=0
     local tests_passed=0
@@ -44,12 +48,11 @@ run_all_shell_tests() {
     
     print_status $BLUE "🧪 Starting shell script test suite..."
     echo
-    
     # Find all test files
     local test_files=()
     while IFS= read -r -d '' file; do
         test_files+=("$file")
-    done < <(find "$test_dir" -name "*.bats" -print0 2>/dev/null || true)
+    done < <(find "$test_dir" -name "test_*.bats" -print0 2>/dev/null || true)
     
     if [ ${#test_files[@]} -eq 0 ]; then
         print_status $YELLOW "No shell test files found"

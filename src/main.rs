@@ -13,7 +13,6 @@ use std::thread;
 use std::time::Duration;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use serde::{Deserialize, Serialize};
-use serde_json;
 
 // Global interrupt flag
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
@@ -810,7 +809,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
     // Initial draw
     terminal.draw(|f| {
         let mut state = app_state.lock().unwrap();
-        ui(f, &mut *state)
+        ui(f, &mut state)
     })?;
 
     // Main event loop with proper error handling
@@ -918,7 +917,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                         let prompt = state.popup.bash_prompt.clone();
                                         state.popup.bash_output.push(format!("{}{}", prompt, command));
                                         
-                                        let parts: Vec<&str> = command.trim().split_whitespace().collect();
+                                        let parts: Vec<&str> = command.split_whitespace().collect();
                                         if parts.is_empty() {
                                             // Empty command, just show prompt again
                                         } else {
@@ -1297,7 +1296,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                     // Handle terminal resize - redraw immediately
                     terminal.draw(|f| {
                         let mut state = app_state.lock().unwrap();
-                        ui(f, &mut *state)
+                        ui(f, &mut state)
                     })?;
                 }
                 _ => {}
@@ -1307,7 +1306,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
         // Redraw the UI
         terminal.draw(|f| {
             let mut state = app_state.lock().unwrap();
-            ui(f, &mut *state)
+            ui(f, &mut state)
         })?;
         
         // Small delay to prevent excessive CPU usage
@@ -1319,7 +1318,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
 
 fn is_text_input_field(step: usize) -> bool {
     match step {
-        23 | 24 | 25 | 26 => true,  // Hostname, Username, User Password, Root Password
+        23..=26 => true,  // Hostname, Username, User Password, Root Password
         _ => false,  // Selection-based fields (including boot mode, disk, packages, etc.)
     }
 }
@@ -1401,7 +1400,7 @@ fn detect_disks() -> Vec<String> {
             let mut formatted_disks = Vec::new();
             for disk in disks {
                 if let Ok(size_output) = Command::new("lsblk")
-                    .args(&["-d", "-n", "-o", "SIZE", &disk])
+                    .args(["-d", "-n", "-o", "SIZE", &disk])
                     .output() {
                     let size_str = String::from_utf8_lossy(&size_output.stdout).trim().to_string();
                     formatted_disks.push(format!("{} ({})", disk, size_str));
@@ -1416,7 +1415,7 @@ fn detect_disks() -> Vec<String> {
     // Fallback to direct lsblk call
     let mut disks = Vec::new();
     if let Ok(output) = Command::new("lsblk")
-        .args(&["-d", "-n", "-o", "NAME,SIZE,TYPE"])
+        .args(["-d", "-n", "-o", "NAME,SIZE,TYPE"])
         .output() {
         let output_str = String::from_utf8_lossy(&output.stdout);
         for line in output_str.lines() {
@@ -1459,7 +1458,7 @@ fn detect_timezones_for_region(region: &str) -> Vec<String> {
     // Fallback to direct timedatectl call
     let mut timezones = Vec::new();
     if let Ok(output) = Command::new("timedatectl")
-        .args(&["list-timezones"])
+        .args(["list-timezones"])
         .output() {
         let output_str = String::from_utf8_lossy(&output.stdout);
         for line in output_str.lines() {
@@ -1522,9 +1521,9 @@ fn update_app_state_from_progress(app_state: &Arc<Mutex<InstallerState>>, progre
     state.status_message = progress_update.message.clone();
     
     // Add the progress message to output log
-    let log_message = format!("[{}] {}: {} ({}%)", 
+    let log_message = format!("[{}] {:?}: {} ({}%)", 
         progress_update.timestamp.as_ref().unwrap_or(&"".to_string()),
-        format!("{:?}", progress_update.message_type),
+        progress_update.message_type,
         progress_update.message,
         progress_update.progress
     );
@@ -1865,7 +1864,7 @@ fn run_actual_installer(app_state: Arc<Mutex<InstallerState>>, config_values: Ve
     env_vars.insert("TUI_MODE".to_string(), "true".to_string());
     
     // Map TUI configuration values to environment variables expected by bash installer
-    env_vars.insert("BOOT_MODE_OVERRIDE".to_string(), config_values.get(0).unwrap_or(&String::new()).clone());
+    env_vars.insert("BOOT_MODE_OVERRIDE".to_string(), config_values.first().unwrap_or(&String::new()).clone());
     env_vars.insert("WANT_SECURE_BOOT".to_string(), config_values.get(1).unwrap_or(&String::new()).clone());
     env_vars.insert("LOCALE".to_string(), config_values.get(2).unwrap_or(&String::new()).clone());
     env_vars.insert("KEYMAP".to_string(), config_values.get(3).unwrap_or(&String::new()).clone());
@@ -1915,7 +1914,7 @@ fn run_actual_installer(app_state: Arc<Mutex<InstallerState>>, config_values: Ve
     env_vars.insert("INSTALL_CUSTOM_PACKAGES".to_string(), if config_values.get(21).unwrap_or(&String::new()).is_empty() { "no".to_string() } else { "yes".to_string() });
     env_vars.insert("INSTALL_CUSTOM_AUR_PACKAGES".to_string(), if config_values.get(28).unwrap_or(&String::new()).is_empty() { "no".to_string() } else { "yes".to_string() });
     env_vars.insert("WANT_DOTFILES_DEPLOYMENT".to_string(), if config_values.get(38).unwrap_or(&String::new()).is_empty() { "no".to_string() } else { "yes".to_string() });
-    env_vars.insert("OVERRIDE_BOOT_MODE".to_string(), if config_values.get(0).unwrap_or(&String::new()) == "auto" { "no".to_string() } else { "yes".to_string() });
+    env_vars.insert("OVERRIDE_BOOT_MODE".to_string(), if config_values.first().unwrap_or(&String::new()) == "auto" { "no".to_string() } else { "yes".to_string() });
     
     // Run the installer and capture both stdout and stderr
     let mut child = Command::new("bash")
@@ -1931,50 +1930,42 @@ fn run_actual_installer(app_state: Arc<Mutex<InstallerState>>, config_values: Ve
     let stderr_app_state = app_state.clone();
     
     // Handle stderr in a separate thread (this contains JSON progress updates)
-    let stderr_handle = if let Some(stderr) = child.stderr.take() {
-        Some(thread::spawn(move || {
+    let stderr_handle = child.stderr.take().map(|stderr| thread::spawn(move || {
             let reader = BufReader::new(stderr);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    // Try to parse as JSON progress update first
-                    if let Ok(progress_update) = serde_json::from_str::<ProgressUpdate>(&line) {
-                        // Update app state with parsed progress
-                        update_app_state_from_progress(&stderr_app_state, &progress_update);
-                    } else {
-                        // If not JSON, treat as regular output/error
-                        let mut state = stderr_app_state.lock().unwrap();
-                        state.installer_output.push(line.clone());
-                        if state.installer_output.len() > 50 {
-                            state.installer_output.remove(0);
-                        }
-                        
-                        // Check if it looks like an error
-                        if line.to_lowercase().contains("error") || line.to_lowercase().contains("failed") {
-                            state.status_message = format!("Error: {}", line);
-                        }
-                    }
-                }
-            }
-        }))
-    } else {
-        None
-    };
-
-    // Handle stdout for general output
-    if let Some(stdout) = child.stdout.take() {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            if let Ok(line) = line {
-                // Add stdout to output log
-                let mut state = app_state.lock().unwrap();
+        for line in reader.lines().map_while(Result::ok) {
+            // Try to parse as JSON progress update first
+            if let Ok(progress_update) = serde_json::from_str::<ProgressUpdate>(&line) {
+                // Update app state with parsed progress
+                update_app_state_from_progress(&stderr_app_state, &progress_update);
+            } else {
+                // If not JSON, treat as regular output/error
+                let mut state = stderr_app_state.lock().unwrap();
                 state.installer_output.push(line.clone());
                 if state.installer_output.len() > 50 {
                     state.installer_output.remove(0);
                 }
                 
-                // Also try to parse for any fallback progress indicators
-                parse_installer_output(&app_state, &line);
+                // Check if it looks like an error
+                if line.to_lowercase().contains("error") || line.to_lowercase().contains("failed") {
+                    state.status_message = format!("Error: {}", line);
+                }
             }
+        }
+    }));
+
+    // Handle stdout for general output
+    if let Some(stdout) = child.stdout.take() {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            // Add stdout to output log
+            let mut state = app_state.lock().unwrap();
+            state.installer_output.push(line.clone());
+            if state.installer_output.len() > 50 {
+                state.installer_output.remove(0);
+            }
+            
+            // Also try to parse for any fallback progress indicators
+            parse_installer_output(&app_state, &line);
         }
     }
     
@@ -2550,11 +2541,7 @@ fn render_output(f: &mut Frame, area: Rect, app_state: &mut InstallerState) {
     let total_items = output_items.len();
     
     // Auto-scroll to bottom (show latest output)
-    let start_index = if total_items > available_height as usize {
-        total_items - available_height as usize
-    } else {
-        0
-    };
+    let start_index = total_items.saturating_sub(available_height as usize);
 
     let visible_items: Vec<ListItem> = output_items
         .into_iter()
@@ -2896,7 +2883,7 @@ mod tests {
         let package = create_test_package();
         assert_eq!(package.repo, "core");
         assert_eq!(package.name, "linux");
-        assert_eq!(package.installed, false);
+        assert!(!package.installed);
     }
 
     #[test]
@@ -2904,7 +2891,7 @@ mod tests {
         let state = create_test_installer_state();
         assert_eq!(state.current_phase, "Configuration");
         assert_eq!(state.progress, 0);
-        assert_eq!(state.is_running, false);
+        assert!(!state.is_running);
         assert_eq!(state.config_values.len(), 39);
     }
 
@@ -2941,17 +2928,17 @@ mod tests {
     fn test_popup_type_options() {
         // Test disk popup
         let (options, title) = get_popup_options(&PopupType::DiskSelection);
-        assert!(options.len() > 0);
+        assert!(!options.is_empty());
         assert_eq!(title, "Select Installation Disk");
         
         // Test partition strategy popup
         let (options, title) = get_popup_options(&PopupType::PartitioningStrategy);
-        assert!(options.len() > 0);
+        assert!(!options.is_empty());
         assert_eq!(title, "Select Partitioning Strategy");
         
         // Test RAID level popup
         let (options, title) = get_popup_options(&PopupType::RAIDLevel);
-        assert!(options.len() > 0);
+        assert!(!options.is_empty());
         assert_eq!(title, "Select RAID Level");
     }
 
@@ -2974,7 +2961,7 @@ mod tests {
         let state = InstallerState::default();
         assert_eq!(state.current_phase, "Configuration");
         assert_eq!(state.progress, 0);
-        assert_eq!(state.is_running, false);
+        assert!(!state.is_running);
         assert_eq!(state.config_values.len(), 39);
         assert_eq!(state.config_step, 0);
     }
@@ -2992,7 +2979,7 @@ mod tests {
         };
         
         assert_eq!(popup.popup_type, PopupType::DiskSelection);
-        assert_eq!(popup.is_active, true);
+        assert!(popup.is_active);
         assert_eq!(popup.selected_index, 0);
         assert_eq!(popup.options.len(), 2);
         assert_eq!(popup.title, "Select Disk");
@@ -3002,8 +2989,8 @@ mod tests {
     fn test_installation_phase_enum() {
         let phase = InstallationPhase::DiskPartitioning;
         match phase {
-            InstallationPhase::DiskPartitioning => assert!(true),
-            _ => assert!(false),
+            InstallationPhase::DiskPartitioning => {},
+            _ => unreachable!(),
         }
     }
 
@@ -3011,8 +2998,8 @@ mod tests {
     fn test_message_type_enum() {
         let msg_type = MessageType::Progress;
         match msg_type {
-            MessageType::Progress => assert!(true),
-            _ => assert!(false),
+            MessageType::Progress => {},
+            _ => unreachable!(),
         }
     }
 
@@ -3020,8 +3007,8 @@ mod tests {
     fn test_popup_type_enum() {
         let popup_type = PopupType::DiskSelection;
         match popup_type {
-            PopupType::DiskSelection => assert!(true),
-            _ => assert!(false),
+            PopupType::DiskSelection => {},
+            _ => unreachable!(),
         }
     }
 
@@ -3046,10 +3033,10 @@ mod tests {
         
         // Test initial state
         assert_eq!(state.current_input, "");
-        assert_eq!(state.input_mode, false);
+        assert!(!state.input_mode);
         assert_eq!(state.editing_field, None);
-        assert_eq!(state.is_complete, false);
-        assert_eq!(state.is_configuring, true);
+        assert!(!state.is_complete);
+        assert!(state.is_configuring);
         
         // Test state changes
         state.current_input = "test input".to_string();
@@ -3057,7 +3044,7 @@ mod tests {
         state.editing_field = Some(0);
         
         assert_eq!(state.current_input, "test input");
-        assert_eq!(state.input_mode, true);
+        assert!(state.input_mode);
         assert_eq!(state.editing_field, Some(0));
     }
 

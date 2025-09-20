@@ -1,9 +1,6 @@
 #!/bin/bash
 # test_simple.bats - Simple test to verify our testing framework works
 
-# Source the test framework
-source "$(dirname "$0")/test_framework.sh"
-
 # Simple test function
 test_basic_functionality() {
     # Test basic assertions

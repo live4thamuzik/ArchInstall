@@ -2,7 +2,7 @@
 # test_framework.sh - Simple testing framework for shell scripts
 # This provides bats-core-like functionality without external dependencies
 
-set -euo pipefail
+set -uo pipefail
 
 # Colors for output
 RED='\033[0;31m'
@@ -264,6 +264,12 @@ export -f run_test print_status
 
 # Main execution
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    # Initialize test counters
+    TESTS_PASSED=0
+    TESTS_FAILED=0
+    TESTS_RUN=0
+    FAILED_TESTS=()
+    
     # If this script is run directly, run all test files
     if [ $# -eq 0 ]; then
         # Find all test files
@@ -271,7 +277,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
         if [ -d "tests" ]; then
             while IFS= read -r -d '' file; do
                 test_files+=("$file")
-            done < <(find tests -name "*.bats" -print0 2>/dev/null || true)
+            done < <(find tests -name "test_*.bats" -print0 2>/dev/null || true)
         fi
         
         if [ ${#test_files[@]} -eq 0 ]; then
