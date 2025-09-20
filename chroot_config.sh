@@ -14,11 +14,14 @@ PASSED_KEYMAP="${KEYMAP:-}"
 # Strict mode for this script
 set -euo pipefail
 
-# Source its own copy of config.sh and utils.sh from its copied location
-source ./config.sh
+# Source its own copy of YAML parser and utils.sh from its copied location
+source ./yaml_parser.sh
 source ./utils.sh
 source ./disk_strategies.sh
 source ./dialogs.sh
+
+# Load YAML configuration
+load_yaml_config "config.yaml" || _log_error "Failed to load YAML configuration in chroot"
 
 # Restore passed values so config defaults do not overwrite them
 [ -n "$PASSED_MAIN_USERNAME" ] && MAIN_USERNAME="$PASSED_MAIN_USERNAME"
@@ -181,6 +184,7 @@ _log_success() { echo -e "\n\e[32;1m============================================
     case "$DESKTOP_ENVIRONMENT" in
         "gnome") install_packages_chroot "${DESKTOP_ENVIRONMENTS_GNOME_PACKAGES[@]}" || _log_error "Desktop Environment packages installation failed." ;;
         "kde") install_packages_chroot "${DESKTOP_ENVIRONMENTS_KDE_PACKAGES[@]}" || _log_error "Desktop Environment packages installation failed." ;;
+        "xfce") install_packages_chroot "${DESKTOP_ENVIRONMENTS_XFCE_PACKAGES[@]}" || _log_error "Desktop Environment packages installation failed." ;;
         "hyprland") install_packages_chroot "${DESKTOP_ENVIRONMENTS_HYPRLAND_PACKAGES[@]}" || _log_error "Desktop Environment packages installation failed." ;;
         "none") _log_info "No desktop environment to install" ;;
     esac
@@ -196,11 +200,18 @@ _log_success() { echo -e "\n\e[32;1m============================================
             install_packages_chroot "${DISPLAY_MANAGERS_SDDM_PACKAGES[@]}" || _log_error "Display Manager packages installation failed."
             enable_systemd_service_chroot "$DISPLAY_MANAGER" || _log_error "Failed to enable Display Manager service."
             ;;
+        "lightdm") 
+            install_packages_chroot "${DISPLAY_MANAGERS_LIGHTDM_PACKAGES[@]}" || _log_error "Display Manager packages installation failed."
+            enable_systemd_service_chroot "$DISPLAY_MANAGER" || _log_error "Failed to enable Display Manager service."
+            ;;
         "none") _log_info "No display manager to install" ;;
     esac
     
     _log_info "Installing GPU Drivers..."
     install_gpu_drivers_chroot || _log_error "GPU driver installation failed."
+
+    _log_info "Installing CPU Microcode..."
+    install_cpu_microcode || _log_error "CPU microcode installation failed."
 
     # --- Phase 4: Optional Software & User Customization ---
     # Multilib repository is now handled in configure_pacman_chroot()

@@ -245,8 +245,11 @@ VG_NAME="volgroup0" # Default LVM Volume Group name (from your old script)
 # For example, PARTITION_STRATEGY_FUNCTIONS[0]="auto_simple", PARTITION_STRATEGY_FUNCTIONS[1]="do_auto_simple_partitioning"
 declare -a PARTITION_STRATEGY_FUNCTIONS=(
     "auto_simple" "do_auto_simple_partitioning"
+    "auto_simple_luks" "do_auto_simple_luks_partitioning"
+    "auto_lvm" "do_auto_lvm_partitioning"
     "auto_luks_lvm" "do_auto_luks_lvm_partitioning"
-    "auto_raid_luks_lvm" "do_auto_raid_luks_lvm_partitioning"
+    "auto_raid_simple" "do_auto_raid_simple_partitioning"
+    "auto_raid_lvm" "do_auto_raid_lvm_partitioning"
     "manual" "do_manual_partitioning_guided"
 )
 
@@ -254,7 +257,11 @@ declare -a PARTITION_STRATEGY_FUNCTIONS=(
 # Partitioning strategies that the script supports
 declare -a PARTITION_STRATEGIES_OPTIONS=(
     "auto_simple"
+    "auto_simple_luks"
+    "auto_lvm"
     "auto_luks_lvm"
+    "auto_raid_simple"
+    "auto_raid_lvm"
     "manual"
 )
 # Note: "auto_raid_luks_lvm" will be conditionally added in dialogs.sh based on disk count
@@ -271,7 +278,7 @@ declare -a FILESYSTEM_OPTIONS=(
 )
 
 # Kernel types for installation
-declare -a KERNEL_TYPES_OPTIONS=("linux" "linux-lts")
+declare -a KERNEL_TYPES_OPTIONS=("linux" "linux-lts" "linux-zen" "linux-hardened")
 
 # Timezone top-level regions (for initial selection)
 declare -a TIMEZONE_REGIONS=(
@@ -317,6 +324,7 @@ declare -a REFLECTOR_COMMON_COUNTRIES=(
 declare -a DESKTOP_ENVIRONMENTS_OPTIONS=(
     "gnome"
     "kde"
+    "xfce"
     "hyprland"
     "none"
 )
@@ -325,6 +333,7 @@ declare -a DESKTOP_ENVIRONMENTS_OPTIONS=(
 declare -a DISPLAY_MANAGER_OPTIONS=(
     "gdm"
     "sddm"
+    "lightdm"
     "none"
 )
 
@@ -358,6 +367,8 @@ declare -a GRUB_THEME_OPTIONS=(
 declare -a BASE_PACKAGES_ESSENTIAL=("base" "curl")
 declare -a BASE_PACKAGES_KERNEL_LINUX=("linux" "linux-firmware" "linux-headers")
 declare -a BASE_PACKAGES_KERNEL_LTS=("linux-lts" "linux-firmware" "linux-lts-headers")
+declare -a BASE_PACKAGES_KERNEL_ZEN=("linux-zen" "linux-firmware" "linux-zen-headers")
+declare -a BASE_PACKAGES_KERNEL_HARDENED=("linux-hardened" "linux-firmware" "linux-hardened-headers")
 declare -a BASE_PACKAGES_BOOTLOADER_GRUB=("grub" "efibootmgr" "os-prober")
 declare -a BASE_PACKAGES_BOOTLOADER_SYSTEMDBOOT=("systemd-boot")
 declare -a BASE_PACKAGES_SECURE_BOOT=("sbctl")
@@ -388,6 +399,7 @@ declare -a BASE_PACKAGES_FS_XFS=("xfsprogs")
 # Desktop Environments and their core packages (indexed arrays of package names)
 declare -a DESKTOP_ENVIRONMENTS_GNOME_PACKAGES=("gnome" "gnome-extra" "gnome-tweaks" "firefox")
 declare -a DESKTOP_ENVIRONMENTS_KDE_PACKAGES=("plasma-desktop" "kde-applications" "dolphin" "firefox")
+declare -a DESKTOP_ENVIRONMENTS_XFCE_PACKAGES=("xfce4" "xfce4-goodies" "thunar" "firefox")
 # Hyprland packages - Core Hyprland and essential ecosystem packages
 declare -a DESKTOP_ENVIRONMENTS_HYPRLAND_PACKAGES=(
     "hyprland" "xdg-desktop-portal-hyprland"
@@ -405,6 +417,7 @@ declare -a DESKTOP_ENVIRONMENTS_NONE_PACKAGES=("")
 # Display Managers (indexed arrays of package names)
 declare -a DISPLAY_MANAGERS_GDM_PACKAGES=("gdm")
 declare -a DISPLAY_MANAGERS_SDDM_PACKAGES=("sddm")
+declare -a DISPLAY_MANAGERS_LIGHTDM_PACKAGES=("lightdm" "lightdm-gtk-greeter")
 declare -a DISPLAY_MANAGERS_NONE_PACKAGES=("")
 
 

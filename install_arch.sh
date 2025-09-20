@@ -1,19 +1,38 @@
 #!/bin/bash
 # install_arch.sh - Arch Linux Automated Installer
+#
+# ARCHITECTURE OVERVIEW:
+# This script is part of a hybrid Rust/Bash architecture:
+# - Rust TUI (archinstall-tui): Handles user interface and configuration
+# - Bash Scripts (this file): Execute actual system installation commands
+# - Communication: Direct process communication via JSON progress updates
+#
+# The TUI launches this script with --bash-only flag and monitors its output
+# for structured progress updates. This separation allows us to leverage:
+# - Rust: Safe, fast, polished user interface with modern TUI libraries
+# - Bash: Natural system command execution and shell scripting capabilities
 
 # Strict mode: Exit on error, unset variables, pipefail
 set -euo pipefail
 
 # --- Source all necessary script files ---
-# Source config.sh first to get default variables and arrays/maps
-source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
+# Source YAML parser first
+source "$(dirname "${BASH_SOURCE[0]}")/yaml_parser.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
-source "$(dirname "${BASH_SOURCE[0]}")/dialogs.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/disk_strategies.sh"
+
+# Only source dialogs.sh if NOT running in TUI mode
+if [ "${TUI_MODE:-}" != "true" ]; then
+    source "$(dirname "${BASH_SOURCE[0]}")/dialogs.sh"
+fi
 # TUI integration - progress is handled directly by the TUI process
 
-# --- Main Installation Function ---
-main() {
+# --- Phase Functions ---
+# Phase 0: Initialize and validate configuration
+phase_initialization() {
+    # Load YAML configuration first
+    load_yaml_config "config.yaml" || error_exit "Failed to load YAML configuration"
+    
     # Initialize enhanced logging system
     setup_logging
     
@@ -26,14 +45,48 @@ main() {
 
     check_prerequisites || error_exit "Prerequisite check failed."
 
+    # Apply boot mode override if specified
+    apply_boot_mode_override
+}
 
-    # Stage 1: Gather User Input (Always interactive now, no config loading)
-    echo "=== PHASE 0: Gathering Installation Details ==="
-    tui_progress_update "UserInput" "10" "Gathering installation details..."
-    log_header "Stage 1: Gathering Installation Details"
-    gather_installation_details || error_exit "Installation details gathering failed."
-    display_summary_and_confirm || error_exit "Installation cancelled by user."
-    tui_progress_update "UserInput" "20" "User input completed"
+# Phase 1: Gather user input and validate configuration
+phase_user_input() {
+
+    # Stage 1: Gather User Input (Skip if running from TUI)
+    if [ "${TUI_MODE:-}" != "true" ]; then
+        echo "=== PHASE 0: Gathering Installation Details ==="
+        tui_progress_update "UserInput" "10" "Gathering installation details..."
+        log_header "Stage 1: Gathering Installation Details"
+        gather_installation_details || error_exit "Installation details gathering failed."
+        display_summary_and_confirm || error_exit "Installation cancelled by user."
+        tui_progress_update "UserInput" "20" "User input completed"
+    else
+        echo "=== PHASE 0: Using TUI Configuration ==="
+        tui_progress_update "UserInput" "10" "Using configuration from TUI..."
+        log_header "Stage 1: Using TUI Configuration"
+        log_info "Running in TUI mode - using pre-configured values"
+        
+        # Validate that required TUI configuration is present
+        if [ -z "${MAIN_USERNAME:-}" ] || [ -z "${INSTALL_DISK:-}" ] || [ -z "${SYSTEM_HOSTNAME:-}" ]; then
+            error_exit "Required configuration missing from TUI. Please check username, disk, and hostname."
+        fi
+        
+        # Validate input parameters to prevent command injection
+        if ! validate_username "$MAIN_USERNAME" "TUI configuration"; then
+            error_exit "Invalid username provided in TUI configuration"
+        fi
+        
+        if ! validate_hostname "$SYSTEM_HOSTNAME" "TUI configuration"; then
+            error_exit "Invalid hostname provided in TUI configuration"
+        fi
+        
+        if ! validate_disk_device "$INSTALL_DISK" "TUI configuration"; then
+            error_exit "Invalid disk device provided in TUI configuration"
+        fi
+        
+        log_info "Configuration validated successfully"
+        tui_progress_update "UserInput" "20" "TUI configuration loaded and validated"
+    fi
     
     # Verify the boot mode (UEFI bitness check) - after user input but before disk partitioning
     log_info "Verifying boot mode and UEFI bitness..."
@@ -45,6 +98,10 @@ main() {
     
     # Set console keymap for live environment
     set_console_keymap_live
+}
+
+# Phase 2: Disk partitioning and formatting
+phase_disk_partitioning() {
 
     # Stage 2: Disk Partitioning and Formatting
     echo "=== PHASE 1: Disk Partitioning ==="
@@ -53,7 +110,10 @@ main() {
     execute_disk_strategy || error_exit "Disk partitioning and formatting failed."
     tui_progress_update "DiskPartitioning" "40" "Disk partitioning completed"
     echo "Disk partitioning complete"
+}
 
+# Phase 3: Base system installation
+phase_base_installation() {
     # Stage 3: Base System Installation
     echo "=== PHASE 2: Base Installation ==="
     tui_progress_update "PackageInstallation" "50" "Installing base system packages..."
@@ -66,6 +126,10 @@ main() {
     log_info "Generating fstab file..."
     generate_fstab || error_exit "Fstab generation failed."
     echo "Packages installed"
+}
+
+# Phase 4: Prepare chroot environment and copy files
+phase_prepare_chroot() {
 
     # Stage 4: Chroot Configuration
     echo "=== PHASE 4: System Configuration ==="
@@ -73,7 +137,11 @@ main() {
     log_header "Stage 4: Post-Installation (Chroot) Configuration"
 
     log_info "Copying chroot configuration files to /mnt..."
-    cp -v ./chroot_config.sh ./config.sh ./utils.sh ./disk_strategies.sh ./dialogs.sh /mnt || error_exit "Failed to copy all necessary scripts to chroot."
+    if [ "${TUI_MODE:-}" != "true" ]; then
+        cp -v ./chroot_config.sh ./config.yaml ./yaml_parser.sh ./utils.sh ./disk_strategies.sh ./dialogs.sh /mnt || error_exit "Failed to copy all necessary scripts to chroot."
+    else
+        cp -v ./chroot_config.sh ./config.yaml ./yaml_parser.sh ./utils.sh ./disk_strategies.sh /mnt || error_exit "Failed to copy all necessary scripts to chroot."
+    fi
     
     log_info "Copying Source directory to /mnt..."
     cp -r ./Source /mnt || error_exit "Failed to copy Source directory to chroot."
@@ -85,18 +153,31 @@ main() {
     fi
 
     # Verify the files exist at the destination
-    if [ ! -f "/mnt/chroot_config.sh" ] || \
-       [ ! -f "/mnt/config.sh" ] || \
-       [ ! -f "/mnt/utils.sh" ] || \
-       [ ! -f "/mnt/disk_strategies.sh" ] || \
-       [ ! -f "/mnt/dialogs.sh" ]; then
-        error_exit "One or more required script files not found in destination directory after copying."
+    if [ "${TUI_MODE:-}" != "true" ]; then
+        if [ ! -f "/mnt/chroot_config.sh" ] || \
+           [ ! -f "/mnt/config.yaml" ] || \
+           [ ! -f "/mnt/yaml_parser.sh" ] || \
+           [ ! -f "/mnt/utils.sh" ] || \
+           [ ! -f "/mnt/disk_strategies.sh" ] || \
+           [ ! -f "/mnt/dialogs.sh" ]; then
+            error_exit "One or more required script files not found in destination directory after copying."
+        fi
+    else
+        if [ ! -f "/mnt/chroot_config.sh" ] || \
+           [ ! -f "/mnt/config.yaml" ] || \
+           [ ! -f "/mnt/yaml_parser.sh" ] || \
+           [ ! -f "/mnt/utils.sh" ] || \
+           [ ! -f "/mnt/disk_strategies.sh" ]; then
+            error_exit "One or more required script files not found in destination directory after copying."
+        fi
     fi
 
     log_info "Setting permissions for chroot scripts..."
     chmod +x /mnt/*.sh || error_exit "Failed to make chroot scripts executable."
-    
-    # --- Export Variables (same method as working ArchL4TM version) ---
+}
+
+# Export all variables for chroot environment
+export_chroot_variables() {
     log_info "Exporting variables for chroot environment..."
     export MAIN_USERNAME
     export ROOT_PASSWORD
@@ -204,7 +285,10 @@ main() {
     log_info "  ROOT_PASSWORD: '${ROOT_PASSWORD:+SET}' (length: ${#ROOT_PASSWORD})"
     log_info "  MAIN_USER_PASSWORD: '${MAIN_USER_PASSWORD:+SET}' (length: ${#MAIN_USER_PASSWORD})"
     log_info "  SYSTEM_HOSTNAME: '${SYSTEM_HOSTNAME:-NOT_SET}'"
+}
 
+# Phase 5: Execute chroot configuration
+phase_chroot_execution() {
     # Ensure EFI partition is properly mounted before chroot
     if [ "$BOOT_MODE" == "uefi" ]; then
         log_info "Verifying EFI partition is properly mounted before chroot..."
@@ -308,10 +392,24 @@ export VG_NAME='$VG_NAME'
 EOF
     
     # Execute chroot configuration with environment file
-    arch-chroot /mnt /bin/bash -c "source /tmp/chroot_env.sh && ./chroot_config.sh" || error_exit "Chroot configuration failed."
+    log_info "Starting chroot configuration..."
+    if ! arch-chroot /mnt /bin/bash -c "source /tmp/chroot_env.sh && ./chroot_config.sh"; then
+        local exit_code=$?
+        log_error "Chroot configuration failed with exit code: $exit_code"
+        log_error "This could be due to:"
+        log_error "  - Missing or corrupted script files in /mnt"
+        log_error "  - Invalid environment variables"
+        log_error "  - Failed system configuration steps"
+        log_error "  - Insufficient permissions in chroot environment"
+        log_error "Check the chroot logs at /mnt/var/log/archinstall-chroot.log for details"
+        error_exit "Chroot configuration failed."
+    fi
     log_info "Chroot setup complete."
     echo "System configuration complete"
-    
+}
+
+# Phase 6: Finalization and cleanup
+phase_finalization() {
     # Stage 5: Finalization
     echo "=== PHASE 5: Finalization ==="
     tui_progress_update "Finalization" "90" "Finalizing installation..."
@@ -327,7 +425,25 @@ EOF
     
     # TUI cleanup handled automatically by TUI process
     
-    prompt_reboot_system
+    # Only prompt for reboot in non-TUI mode
+    if [ "${TUI_MODE:-}" != "true" ]; then
+        prompt_reboot_system
+    else
+        log_info "Installation complete! The TUI will handle the completion notification."
+    fi
+}
+
+# --- Main Installation Function ---
+main() {
+    # Execute installation phases in order
+    phase_initialization
+    phase_user_input
+    phase_disk_partitioning
+    phase_base_installation
+    phase_prepare_chroot
+    export_chroot_variables
+    phase_chroot_execution
+    phase_finalization
 }
 
 # Error handling wrapper for the main function
@@ -396,12 +512,29 @@ install_base_system_target() {
         essential_packages="$essential_packages linux linux-firmware linux-headers"
     elif [ "$KERNEL_TYPE" == "linux-lts" ]; then
         essential_packages="$essential_packages linux-lts linux-firmware linux-lts-headers"
+    elif [ "$KERNEL_TYPE" == "linux-zen" ]; then
+        essential_packages="$essential_packages linux-zen linux-firmware linux-zen-headers"
+    elif [ "$KERNEL_TYPE" == "linux-hardened" ]; then
+        essential_packages="$essential_packages linux-hardened linux-firmware linux-hardened-headers"
     else
         error_exit "Unsupported KERNEL_TYPE: $KERNEL_TYPE."
     fi
 
     log_info "Pacstrap essentials: $essential_packages"
-    pacstrap -K /mnt $essential_packages --noconfirm --needed || error_exit "Pacstrap failed to install essential base system."
+    
+    # Enhanced error handling for pacstrap
+    if ! pacstrap -K /mnt $essential_packages --noconfirm --needed; then
+        local exit_code=$?
+        log_error "Pacstrap failed with exit code: $exit_code"
+        log_error "Failed to install essential packages: $essential_packages"
+        log_error "This could be due to:"
+        log_error "  - Network connectivity issues"
+        log_error "  - Invalid mirror configuration"
+        log_error "  - Insufficient disk space in /mnt"
+        log_error "  - Corrupted package database"
+        log_error "Please check your network connection and try again"
+        error_exit "Pacstrap failed to install essential base system."
+    fi
 
     log_info "Base essentials installed on target."
 }

@@ -1,0 +1,329 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Get version
+      id: get_version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get previous tag
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+        
+        # Generate changelog
+        if [ -n "$PREVIOUS_TAG" ]; then
+          CHANGELOG=$(git log --pretty=format:"- %s" $PREVIOUS_TAG..HEAD)
+        else
+          CHANGELOG=$(git log --pretty=format:"- %s" --max-count=20)
+        fi
+        
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+    
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.get_version.outputs.version }}
+        release_name: Release ${{ steps.get_version.outputs.version }}
+        body: |
+          ## Changes in ${{ steps.get_version.outputs.version }}
+          
+          ${{ steps.changelog.outputs.changelog }}
+          
+          ## Installation
+          
+          ### Binary Download
+          Download the appropriate binary for your system from the assets below.
+          
+          ### Docker
+          ```bash
+          docker pull archinstall-tui:${{ steps.get_version.outputs.version }}
+          docker run --rm -it archinstall-tui:${{ steps.get_version.outputs.version }} --help
+          ```
+          
+          ### From Source
+          ```bash
+          git clone https://github.com/${{ github.repository }}
+          cd archinstall
+          cargo build --release
+          ```
+          
+          ## Checksums
+          SHA256 checksums are provided for all binaries to verify integrity.
+        draft: false
+        prerelease: ${{ contains(steps.get_version.outputs.version, 'alpha') || contains(steps.get_version.outputs.version, 'beta') || contains(steps.get_version.outputs.version, 'rc') }}
+
+  build-binary:
+    name: Build Binary
+    runs-on: ${{ matrix.os }}
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: linux-x86_64
+            artifact: archinstall-tui-linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+            name: windows-x86_64
+            artifact: archinstall-tui-windows-x86_64.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            name: macos-x86_64
+            artifact: archinstall-tui-macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: macos-aarch64
+            artifact: archinstall-tui-macos-aarch64
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: ${{ matrix.target }}
+        profile: minimal
+        override: true
+    
+    - name: Install dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential pkg-config libssl-dev
+    
+    - name: Install dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install openssl pkg-config
+    
+    - name: Install dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        # Windows dependencies are handled by the Rust toolchain
+    
+    - name: Build binary
+      run: |
+        cargo build --release --target ${{ matrix.target }}
+    
+    - name: Generate checksum
+      run: |
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          sha256sum target/${{ matrix.target }}/release/archinstall-tui.exe > checksums.txt
+        else
+          sha256sum target/${{ matrix.target }}/release/archinstall-tui > checksums.txt
+        fi
+    
+    - name: Upload binary
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: target/${{ matrix.target }}/release/${{ matrix.artifact }}
+        asset_name: ${{ matrix.artifact }}
+        asset_content_type: application/octet-stream
+    
+    - name: Upload checksum
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: checksums.txt
+        asset_name: ${{ matrix.artifact }}.sha256
+        asset_content_type: text/plain
+
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: create-release
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: archinstall-tui
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=raw,value=latest,enable={{is_default_branch}}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+
+  build-package:
+    name: Build Package
+    runs-on: ubuntu-latest
+    needs: [create-release, build-binary]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+    
+    - name: Build binary
+      run: |
+        cargo build --release
+    
+    - name: Create package structure
+      run: |
+        mkdir -p archinstall-package/usr/bin
+        mkdir -p archinstall-package/usr/share/archinstall
+        mkdir -p archinstall-package/etc/archinstall
+        mkdir -p archinstall-package/usr/share/doc/archinstall
+    
+    - name: Copy files to package
+      run: |
+        cp target/release/archinstall-tui archinstall-package/usr/bin/
+        cp -r Source/ archinstall-package/usr/share/archinstall/
+        cp config.yaml archinstall-package/etc/archinstall/
+        cp *.sh archinstall-package/usr/share/archinstall/
+        cp README.md LICENSE archinstall-package/usr/share/doc/archinstall/
+        cp CI_CD.md SHELL_TESTING.md TESTING.md archinstall-package/usr/share/doc/archinstall/
+    
+    - name: Create package manifest
+      run: |
+        cat > archinstall-package/MANIFEST << EOF
+        Package: archinstall-tui
+        Version: ${{ needs.create-release.outputs.version }}
+        Architecture: x86_64
+        Maintainer: archinstall-tui team
+        Description: Advanced Arch Linux installer with TUI
+        Long-Description: |
+          A modern, user-friendly Arch Linux installer featuring:
+          - Terminal User Interface (TUI) built with Rust
+          - Comprehensive partitioning strategies (RAID, LVM, LUKS)
+          - Automated system configuration
+          - Desktop environment support
+          - AUR package management
+          - Extensive testing and validation
+        Dependencies: bash, util-linux, parted, e2fsprogs, arch-install-scripts
+        Recommends: btrfs-progs, xfsprogs, mdadm, cryptsetup
+        Files:
+          usr/bin/archinstall-tui
+          usr/share/archinstall/
+          etc/archinstall/config.yaml
+          usr/share/doc/archinstall/
+        EOF
+    
+    - name: Create tarball
+      run: |
+        tar -czf archinstall-${{ needs.create-release.outputs.version }}.tar.gz -C archinstall-package .
+    
+    - name: Generate package checksum
+      run: |
+        sha256sum archinstall-${{ needs.create-release.outputs.version }}.tar.gz > archinstall-${{ needs.create-release.outputs.version }}.tar.gz.sha256
+    
+    - name: Upload package
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./archinstall-${{ needs.create-release.outputs.version }}.tar.gz
+        asset_name: archinstall-${{ needs.create-release.outputs.version }}.tar.gz
+        asset_content_type: application/gzip
+    
+    - name: Upload package checksum
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./archinstall-${{ needs.create-release.outputs.version }}.tar.gz.sha256
+        asset_name: archinstall-${{ needs.create-release.outputs.version }}.tar.gz.sha256
+        asset_content_type: text/plain
+
+  notify:
+    name: Notify Release
+    runs-on: ubuntu-latest
+    needs: [create-release, build-binary, build-docker, build-package]
+    if: always()
+    
+    steps:
+    - name: Notify success
+      if: ${{ needs.build-binary.result == 'success' && needs.build-docker.result == 'success' && needs.build-package.result == 'success' }}
+      run: |
+        echo "✅ Release ${{ needs.create-release.outputs.version }} published successfully!"
+        echo "📦 Binaries: Available for Linux, Windows, and macOS"
+        echo "🐳 Docker: archinstall-tui:${{ needs.create-release.outputs.version }}"
+        echo "📁 Package: archinstall-${{ needs.create-release.outputs.version }}.tar.gz"
+    
+    - name: Notify failure
+      if: ${{ needs.build-binary.result == 'failure' || needs.build-docker.result == 'failure' || needs.build-package.result == 'failure' }}
+      run: |
+        echo "❌ Release ${{ needs.create-release.outputs.version }} failed!"
+        echo "Check the workflow logs for details."
+        exit 1

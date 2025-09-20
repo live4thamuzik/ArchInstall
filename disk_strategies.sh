@@ -5,12 +5,27 @@
 execute_disk_strategy() {
     log_info "Executing disk strategy: $PARTITION_SCHEME"
     
+    # Parse the partition scheme to extract strategy and RAID level
+    local base_strategy="$PARTITION_SCHEME"
+    local raid_level=""
+    
+    # Check if this is a RAID strategy with level (e.g., auto_raid_lvm_raid1)
+    if [[ "$PARTITION_SCHEME" =~ ^(.+)_(raid[0-9]+)$ ]]; then
+        base_strategy="${BASH_REMATCH[1]}"
+        raid_level="${BASH_REMATCH[2]}"
+        log_info "Detected RAID strategy: $base_strategy with RAID level: $raid_level"
+    fi
+    
+    # Auto-populate RAID_DEVICES for RAID strategies in TUI mode
+    if [[ "$TUI_MODE" == "true" && "$base_strategy" =~ ^auto_raid ]]; then
+        auto_populate_raid_devices || error_exit "Failed to populate RAID devices"
+    fi
+    
+    # Find the corresponding function name
     local strategy_func=""
     local i=0
-    # Iterate through the array to find the corresponding function name
-    # We do this instead of direct string-based indexing, which fails in Bash 3.x
     while [ "$i" -lt "${#PARTITION_STRATEGY_FUNCTIONS[@]}" ]; do
-        if [ "${PARTITION_STRATEGY_FUNCTIONS[$i]}" == "$PARTITION_SCHEME" ]; then
+        if [ "${PARTITION_STRATEGY_FUNCTIONS[$i]}" == "$base_strategy" ]; then
             strategy_func="${PARTITION_STRATEGY_FUNCTIONS[$((i+1))]}"
             break
         fi
@@ -18,11 +33,46 @@ execute_disk_strategy() {
     done
 
     if [[ -n "$strategy_func" ]]; then
+        # Export RAID level for the partitioning function to use
+        if [[ -n "$raid_level" ]]; then
+            export RAID_LEVEL="$raid_level"
+            log_info "RAID level set to: $RAID_LEVEL"
+        fi
         "$strategy_func" || error_exit "Disk strategy '$PARTITION_SCHEME' failed."
     else
         error_exit "Unknown partitioning scheme: $PARTITION_SCHEME."
     fi
     log_info "Disk strategy execution complete."
+}
+
+# Auto-populate RAID_DEVICES for TUI mode
+auto_populate_raid_devices() {
+    log_info "Auto-populating RAID devices for TUI mode..."
+    
+    # Get all available disks
+    local available_disks=()
+    while IFS= read -r line; do
+        available_disks+=("/dev/$line")
+    done < <(lsblk -dno NAME,TYPE | awk '$2=="disk"{print $1}' | grep -v 'loop' | grep -v 'ram')
+    
+    if [ ${#available_disks[@]} -lt 2 ]; then
+        error_exit "RAID requires at least 2 disks, but only ${#available_disks[@]} disk(s) found: ${available_disks[*]}"
+    fi
+    
+    # Initialize RAID_DEVICES with the primary install disk
+    RAID_DEVICES=("$INSTALL_DISK")
+    
+    # Add additional disks (exclude the primary install disk)
+    for disk in "${available_disks[@]}"; do
+        if [ "$disk" != "$INSTALL_DISK" ]; then
+            RAID_DEVICES+=("$disk")
+        fi
+    done
+    
+    log_info "RAID devices populated: ${RAID_DEVICES[*]}"
+    export RAID_DEVICES
+    
+    return 0
 }
 
 # --- Specific Partitioning Strategy Implementations ---
@@ -90,6 +140,10 @@ do_auto_simple_partitioning() {
 
     # Root Partition and Optional Home Partition
     local root_size_mib=$((102400)) # Defaulting to 100 GiB for a reasonable root partition
+    
+    # Set default filesystem types if not specified
+    ROOT_FILESYSTEM_TYPE="${ROOT_FILESYSTEM_TYPE:-ext4}"
+    HOME_FILESYSTEM_TYPE="${HOME_FILESYSTEM_TYPE:-ext4}"
 
     if [ "$WANT_HOME_PARTITION" == "yes" ]; then
         log_info "Creating Root partition and separate Home partition (rest of disk)..."
@@ -155,6 +209,10 @@ do_auto_simple_partitioning() {
 do_auto_luks_lvm_partitioning() {
     echo "=== PHASE 1: Disk Partitioning (LUKS+LVM) ==="
     log_info "Starting auto LUKS+LVM partitioning for $INSTALL_DISK (Boot Mode: $BOOT_MODE)..."
+
+    # Set default filesystem types if not specified
+    ROOT_FILESYSTEM_TYPE="${ROOT_FILESYSTEM_TYPE:-ext4}"
+    HOME_FILESYSTEM_TYPE="${HOME_FILESYSTEM_TYPE:-ext4}"
 
     wipe_disk "$INSTALL_DISK"
 
@@ -240,6 +298,10 @@ do_auto_raid_luks_lvm_partitioning() {
     echo "=== PHASE 1: Disk Partitioning (RAID+LUKS+LVM) ==="
     log_info "Starting auto RAID+LUKS+LVM partitioning with disks: ${RAID_DEVICES[*]} (Boot Mode: $BOOT_MODE)..."
 
+    # Set default filesystem types if not specified
+    ROOT_FILESYSTEM_TYPE="${ROOT_FILESYSTEM_TYPE:-ext4}"
+    HOME_FILESYSTEM_TYPE="${HOME_FILESYSTEM_TYPE:-ext4}"
+
     if [ ${#RAID_DEVICES[@]} -lt 2 ]; then error_exit "RAID requires at least 2 disks."; fi
 
     local efi_part_num=1
@@ -259,7 +321,7 @@ do_auto_raid_luks_lvm_partitioning() {
         # 1. EFI partition on each disk (if UEFI)
         if [ "$BOOT_MODE" == "uefi" ]; then
             local efi_size_mb="${EFI_PART_SIZE_MIB}M"
-            sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:EF00" "$disk" || error_exit "Failed to create EFI partition on $disk."
+            sgdisk -n "$efi_part_num:0:+$efi_size_mb" -t "$efi_part_num:EF00" "$disk" || error_exit "Failed to create EFI partition on $disk."
             current_start_mib=$((current_start_mib + EFI_PART_SIZE_MIB))
         fi
 
@@ -320,14 +382,419 @@ do_auto_raid_luks_lvm_partitioning() {
     log_info "RAID+LUKS+LVM partitioning complete."
 }
 
+do_auto_simple_luks_partitioning() {
+    echo "=== PHASE 1: Disk Partitioning with LUKS Encryption ==="
+    log_info "Starting auto simple LUKS partitioning for $INSTALL_DISK (Boot Mode: $BOOT_MODE)..."
+
+    wipe_disk "$INSTALL_DISK"
+
+    local current_start_mib=1
+    local part_num=1
+
+    # Create partition table (GPT for UEFI, MBR for BIOS)
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        sgdisk -Z "$INSTALL_DISK" || error_exit "Failed to create GPT label on $INSTALL_DISK."
+    else
+        printf "o\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create MBR label on $INSTALL_DISK."
+    fi
+    partprobe "$INSTALL_DISK"
+
+    # EFI Partition (for UEFI)
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        log_info "Creating EFI partition (${EFI_PART_SIZE_MIB}MiB)..."
+        local efi_size_mb="${EFI_PART_SIZE_MIB}M"
+        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:EF00" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
+        partprobe "$INSTALL_DISK"
+        local efi_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
+        mkfs.fat -F32 "$efi_dev" || error_exit "Failed to format EFI partition."
+        PARTITION_UUIDS_EFI_UUID=$(blkid -s UUID -o value "$efi_dev")
+        PARTITION_UUIDS_EFI_PARTUUID=$(blkid -s PARTUUID -o value "$efi_dev")
+        log_info "EFI partition UUID: $PARTITION_UUIDS_EFI_UUID"
+        part_num=$((part_num + 1))
+    fi
+
+    # Boot Partition (for BIOS or additional boot partition)
+    if [ "$BOOT_MODE" == "bios" ] || [ "$WANT_SEPARATE_BOOT" == "yes" ]; then
+        log_info "Creating Boot partition (${BOOT_PART_SIZE_MIB}MiB)..."
+        local boot_size_mb="${BOOT_PART_SIZE_MIB}M"
+        if [ "$BOOT_MODE" == "uefi" ]; then
+            sgdisk -n "$part_num:0:+$boot_size_mb" -t "$part_num:8300" "$INSTALL_DISK" || error_exit "Failed to create boot partition."
+        else
+            printf "n\np\n$part_num\n\n+${BOOT_PART_SIZE_MIB}M\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create boot partition."
+        fi
+        partprobe "$INSTALL_DISK"
+        local boot_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
+        mkfs.ext4 "$boot_dev" || error_exit "Failed to format boot partition."
+        PARTITION_UUIDS_BOOT_UUID=$(blkid -s UUID -o value "$boot_dev")
+        log_info "Boot partition UUID: $PARTITION_UUIDS_BOOT_UUID"
+        part_num=$((part_num + 1))
+    fi
+
+    # Create LUKS container partition (rest of disk)
+    log_info "Creating LUKS container partition (rest of disk)..."
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        sgdisk -n "$part_num:0:0" -t "$part_num:8309" "$INSTALL_DISK" || error_exit "Failed to create LUKS container partition."
+    else
+        printf "n\np\n$part_num\n\n\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create LUKS container partition."
+    fi
+    partprobe "$INSTALL_DISK"
+    local luks_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
+    
+    # Set up LUKS encryption
+    log_info "Setting up LUKS encryption on $luks_dev..."
+    cryptsetup luksFormat --type luks2 "$luks_dev" || error_exit "Failed to create LUKS container."
+    cryptsetup open "$luks_dev" cryptroot || error_exit "Failed to open LUKS container."
+    
+    # Get LUKS container UUID
+    PARTITION_UUIDS_LUKS_CONTAINER_UUID=$(blkid -s UUID -o value "$luks_dev")
+    log_info "LUKS container UUID: $PARTITION_UUIDS_LUKS_CONTAINER_UUID"
+    
+    # Create filesystem on decrypted device
+    local root_fs="${ROOT_FILESYSTEM:-ext4}"
+    log_info "Creating $root_fs filesystem on /dev/mapper/cryptroot..."
+    case "$root_fs" in
+        "ext4") mkfs.ext4 /dev/mapper/cryptroot || error_exit "Failed to create ext4 filesystem." ;;
+        "btrfs") mkfs.btrfs /dev/mapper/cryptroot || error_exit "Failed to create btrfs filesystem." ;;
+        "xfs") mkfs.xfs /dev/mapper/cryptroot || error_exit "Failed to create xfs filesystem." ;;
+        *) error_exit "Unsupported filesystem: $root_fs" ;;
+    esac
+    
+    PARTITION_UUIDS_ROOT_UUID=$(blkid -s UUID -o value /dev/mapper/cryptroot)
+    log_info "Root filesystem UUID: $PARTITION_UUIDS_ROOT_UUID"
+    
+    log_info "Auto simple LUKS partitioning completed successfully."
+}
+
+do_auto_lvm_partitioning() {
+    echo "=== PHASE 1: Disk Partitioning with LVM ==="
+    log_info "Starting auto LVM partitioning for $INSTALL_DISK (Boot Mode: $BOOT_MODE)..."
+
+    wipe_disk "$INSTALL_DISK"
+
+    local current_start_mib=1
+    local part_num=1
+
+    # Create partition table (GPT for UEFI, MBR for BIOS)
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        sgdisk -Z "$INSTALL_DISK" || error_exit "Failed to create GPT label on $INSTALL_DISK."
+    else
+        printf "o\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create MBR label on $INSTALL_DISK."
+    fi
+    partprobe "$INSTALL_DISK"
+
+    # EFI Partition (for UEFI)
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        log_info "Creating EFI partition (${EFI_PART_SIZE_MIB}MiB)..."
+        local efi_size_mb="${EFI_PART_SIZE_MIB}M"
+        sgdisk -n "$part_num:0:+$efi_size_mb" -t "$part_num:EF00" "$INSTALL_DISK" || error_exit "Failed to create EFI partition."
+        partprobe "$INSTALL_DISK"
+        local efi_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
+        mkfs.fat -F32 "$efi_dev" || error_exit "Failed to format EFI partition."
+        PARTITION_UUIDS_EFI_UUID=$(blkid -s UUID -o value "$efi_dev")
+        PARTITION_UUIDS_EFI_PARTUUID=$(blkid -s PARTUUID -o value "$efi_dev")
+        log_info "EFI partition UUID: $PARTITION_UUIDS_EFI_UUID"
+        part_num=$((part_num + 1))
+    fi
+
+    # Boot Partition (for BIOS or additional boot partition)
+    if [ "$BOOT_MODE" == "bios" ] || [ "$WANT_SEPARATE_BOOT" == "yes" ]; then
+        log_info "Creating Boot partition (${BOOT_PART_SIZE_MIB}MiB)..."
+        local boot_size_mb="${BOOT_PART_SIZE_MIB}M"
+        if [ "$BOOT_MODE" == "uefi" ]; then
+            sgdisk -n "$part_num:0:+$boot_size_mb" -t "$part_num:8300" "$INSTALL_DISK" || error_exit "Failed to create boot partition."
+        else
+            printf "n\np\n$part_num\n\n+${BOOT_PART_SIZE_MIB}M\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create boot partition."
+        fi
+        partprobe "$INSTALL_DISK"
+        local boot_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
+        mkfs.ext4 "$boot_dev" || error_exit "Failed to format boot partition."
+        PARTITION_UUIDS_BOOT_UUID=$(blkid -s UUID -o value "$boot_dev")
+        log_info "Boot partition UUID: $PARTITION_UUIDS_BOOT_UUID"
+        part_num=$((part_num + 1))
+    fi
+
+    # Create LVM physical volume partition (rest of disk)
+    log_info "Creating LVM physical volume partition (rest of disk)..."
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        sgdisk -n "$part_num:0:0" -t "$part_num:8E00" "$INSTALL_DISK" || error_exit "Failed to create LVM partition."
+    else
+        printf "n\np\n$part_num\n\n\nt\n$part_num\n8e\nw\n" | fdisk "$INSTALL_DISK" || error_exit "Failed to create LVM partition."
+    fi
+    partprobe "$INSTALL_DISK"
+    local pv_dev=$(get_partition_path "$INSTALL_DISK" "$part_num")
+    
+    # Set up LVM
+    log_info "Setting up LVM on $pv_dev..."
+    pvcreate "$pv_dev" || error_exit "Failed to create physical volume."
+    vgcreate "$VG_NAME" "$pv_dev" || error_exit "Failed to create volume group."
+    
+    # Create logical volumes
+    local root_size="${ROOT_SIZE_MIB:-102400}M"
+    log_info "Creating root logical volume (${root_size})..."
+    lvcreate -L "$root_size" -n root "$VG_NAME" || error_exit "Failed to create root logical volume."
+    
+    if [ "$WANT_SWAP" == "yes" ]; then
+        local swap_size="${SWAP_SIZE_MIB:-2048}M"
+        log_info "Creating swap logical volume (${swap_size})..."
+        lvcreate -L "$swap_size" -n swap "$VG_NAME" || error_exit "Failed to create swap logical volume."
+        mkswap "/dev/$VG_NAME/swap" || error_exit "Failed to create swap."
+        PARTITION_UUIDS_SWAP_UUID=$(blkid -s UUID -o value "/dev/$VG_NAME/swap")
+        log_info "Swap logical volume UUID: $PARTITION_UUIDS_SWAP_UUID"
+    fi
+    
+    if [ "$WANT_HOME_PARTITION" == "yes" ]; then
+        log_info "Creating home logical volume (rest of space)..."
+        lvcreate -l 100%FREE -n home "$VG_NAME" || error_exit "Failed to create home logical volume."
+    fi
+    
+    # Create filesystem on root logical volume
+    local root_fs="${ROOT_FILESYSTEM:-ext4}"
+    log_info "Creating $root_fs filesystem on /dev/$VG_NAME/root..."
+    case "$root_fs" in
+        "ext4") mkfs.ext4 "/dev/$VG_NAME/root" || error_exit "Failed to create ext4 filesystem." ;;
+        "btrfs") mkfs.btrfs "/dev/$VG_NAME/root" || error_exit "Failed to create btrfs filesystem." ;;
+        "xfs") mkfs.xfs "/dev/$VG_NAME/root" || error_exit "Failed to create xfs filesystem." ;;
+        *) error_exit "Unsupported filesystem: $root_fs" ;;
+    esac
+    
+    PARTITION_UUIDS_LV_ROOT_UUID=$(blkid -s UUID -o value "/dev/$VG_NAME/root")
+    log_info "Root logical volume UUID: $PARTITION_UUIDS_LV_ROOT_UUID"
+    
+    if [ "$WANT_HOME_PARTITION" == "yes" ]; then
+        local home_fs="${HOME_FILESYSTEM:-ext4}"
+        log_info "Creating $home_fs filesystem on /dev/$VG_NAME/home..."
+        case "$home_fs" in
+            "ext4") mkfs.ext4 "/dev/$VG_NAME/home" || error_exit "Failed to create ext4 filesystem." ;;
+            "btrfs") mkfs.btrfs "/dev/$VG_NAME/home" || error_exit "Failed to create btrfs filesystem." ;;
+            "xfs") mkfs.xfs "/dev/$VG_NAME/home" || error_exit "Failed to create xfs filesystem." ;;
+            *) error_exit "Unsupported filesystem: $home_fs" ;;
+        esac
+        
+        PARTITION_UUIDS_LV_HOME_UUID=$(blkid -s UUID -o value "/dev/$VG_NAME/home")
+        log_info "Home logical volume UUID: $PARTITION_UUIDS_LV_HOME_UUID"
+    fi
+    
+    log_info "Auto LVM partitioning completed successfully."
+}
+
+do_auto_raid_simple_partitioning() {
+    echo "=== PHASE 1: Disk Partitioning with Software RAID ==="
+    log_info "Starting auto RAID simple partitioning for multiple disks (RAID Level: ${RAID_LEVEL:-raid1})..."
+
+    # Validate RAID requirements
+    if [ ${#RAID_DEVICES[@]} -lt 2 ]; then 
+        error_exit "RAID requires at least 2 disks. Current disks: ${RAID_DEVICES[*]}"
+    fi
+    
+    local raid_level="${RAID_LEVEL:-raid1}"
+    log_info "RAID level: $raid_level"
+    log_info "RAID devices: ${RAID_DEVICES[*]}"
+    
+    # Set default filesystem types if not specified
+    ROOT_FILESYSTEM_TYPE="${ROOT_FILESYSTEM_TYPE:-ext4}"
+    HOME_FILESYSTEM_TYPE="${HOME_FILESYSTEM_TYPE:-ext4}"
+
+    local efi_part_num=1
+    local boot_part_num=2
+    local root_part_num=3
+    local home_part_num=4
+
+    # --- Phase 1: Partition all RAID member disks identically ---
+    for disk in "${RAID_DEVICES[@]}"; do
+        log_info "Partitioning RAID member disk: $disk"
+        wipe_disk "$disk"
+
+        local current_start_mib=1
+
+        sgdisk -Z "$disk" || error_exit "Failed to create GPT label on $disk."
+        partprobe "$disk"
+
+        # 1. EFI partition on each disk (if UEFI)
+        if [ "$BOOT_MODE" == "uefi" ]; then
+            local efi_size_mb="${EFI_PART_SIZE_MIB}M"
+            sgdisk -n "$efi_part_num:0:+$efi_size_mb" -t "$efi_part_num:EF00" "$disk" || error_exit "Failed to create EFI partition on $disk."
+            current_start_mib=$((current_start_mib + EFI_PART_SIZE_MIB))
+        fi
+
+        # 2. /boot partition on each disk (will be part of RAID)
+        local boot_size_mb="${BOOT_PART_SIZE_MIB}M"
+        sgdisk -n "$boot_part_num:0:+$boot_size_mb" -t "$boot_part_num:8300" "$disk" || error_exit "Failed to create /boot partition on $disk."
+        current_start_mib=$((current_start_mib + BOOT_PART_SIZE_MIB))
+        
+        # 3. Root partition on each disk (will be part of RAID)
+        local root_size_mib=102400  # 100GB
+        sgdisk -n "$root_part_num:0:+${root_size_mib}M" -t "$root_part_num:8300" "$disk" || error_exit "Failed to create root partition on $disk."
+        current_start_mib=$((current_start_mib + root_size_mib))
+        
+        # 4. Home partition on each disk (will be part of RAID, takes rest of disk)
+        if [ "$WANT_HOME_PARTITION" == "yes" ]; then
+            sgdisk -n "$home_part_num:0:0" -t "$home_part_num:8300" "$disk" || error_exit "Failed to create home partition on $disk."
+        fi
+        
+        partprobe "$disk"
+    done
+
+    # --- Phase 2: Assemble RAID Arrays ---
+    # Create RAID for /boot
+    local md_boot_dev="/dev/md0"
+    local boot_component_devices=()
+    for disk in "${RAID_DEVICES[@]}"; do
+        boot_component_devices+=($(get_partition_path "$disk" "$boot_part_num"))
+    done
+    setup_raid "$raid_level" "$md_boot_dev" "${boot_component_devices[@]}" || error_exit "RAID setup for /boot failed."
+    format_filesystem "$md_boot_dev" "ext4"
+    capture_id_for_config "boot" "$md_boot_dev" "UUID"
+    mkdir -p /mnt/boot || error_exit "Failed to create /mnt/boot."
+    safe_mount "$md_boot_dev" "/mnt/boot"
+
+    # Create RAID for root
+    local md_root_dev="/dev/md1"
+    local root_component_devices=()
+    for disk in "${RAID_DEVICES[@]}"; do
+        root_component_devices+=($(get_partition_path "$disk" "$root_part_num"))
+    done
+    setup_raid "$raid_level" "$md_root_dev" "${root_component_devices[@]}" || error_exit "RAID setup for root failed."
+    format_filesystem "$md_root_dev" "$ROOT_FILESYSTEM_TYPE"
+    capture_id_for_config "root" "$md_root_dev" "UUID"
+    safe_mount "$md_root_dev" "/mnt"
+
+    # Create RAID for home (if requested)
+    if [ "$WANT_HOME_PARTITION" == "yes" ]; then
+        local md_home_dev="/dev/md2"
+        local home_component_devices=()
+        for disk in "${RAID_DEVICES[@]}"; do
+            home_component_devices+=($(get_partition_path "$disk" "$home_part_num"))
+        done
+        setup_raid "$raid_level" "$md_home_dev" "${home_component_devices[@]}" || error_exit "RAID setup for home failed."
+        format_filesystem "$md_home_dev" "$HOME_FILESYSTEM_TYPE"
+        capture_id_for_config "home" "$md_home_dev" "UUID"
+        mkdir -p /mnt/home || error_exit "Failed to create /mnt/home."
+        safe_mount "$md_home_dev" "/mnt/home"
+    fi
+
+    # --- Phase 3: Mount EFI for initial install ---
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        local first_efi_dev=$(get_partition_path "${RAID_DEVICES[0]}" "$efi_part_num")
+        format_filesystem "$first_efi_dev" "vfat"
+        capture_id_for_config "efi" "$first_efi_dev" "UUID"
+        capture_id_for_config "efi" "$first_efi_dev" "PARTUUID"
+        mkdir -p /mnt/boot/efi || error_exit "Failed to create /mnt/boot/efi."
+        safe_mount "$first_efi_dev" "/mnt/boot/efi"
+    fi
+
+    log_info "Auto RAID simple partitioning completed successfully."
+}
+
+do_auto_raid_lvm_partitioning() {
+    echo "=== PHASE 1: Disk Partitioning with Software RAID and LVM ==="
+    log_info "Starting auto RAID LVM partitioning for multiple disks (RAID Level: ${RAID_LEVEL:-raid1})..."
+
+    # Validate RAID requirements
+    if [ ${#RAID_DEVICES[@]} -lt 2 ]; then 
+        error_exit "RAID requires at least 2 disks. Current disks: ${RAID_DEVICES[*]}"
+    fi
+    
+    local raid_level="${RAID_LEVEL:-raid1}"
+    log_info "RAID level: $raid_level"
+    log_info "RAID devices: ${RAID_DEVICES[*]}"
+    
+    # Set default filesystem types if not specified
+    ROOT_FILESYSTEM_TYPE="${ROOT_FILESYSTEM_TYPE:-ext4}"
+    HOME_FILESYSTEM_TYPE="${HOME_FILESYSTEM_TYPE:-ext4}"
+
+    local efi_part_num=1
+    local boot_part_num=2
+    local lvm_part_num=3
+
+    # --- Phase 1: Partition all RAID member disks identically ---
+    for disk in "${RAID_DEVICES[@]}"; do
+        log_info "Partitioning RAID member disk: $disk"
+        wipe_disk "$disk"
+
+        local current_start_mib=1
+
+        sgdisk -Z "$disk" || error_exit "Failed to create GPT label on $disk."
+        partprobe "$disk"
+
+        # 1. EFI partition on each disk (if UEFI)
+        if [ "$BOOT_MODE" == "uefi" ]; then
+            local efi_size_mb="${EFI_PART_SIZE_MIB}M"
+            sgdisk -n "$efi_part_num:0:+$efi_size_mb" -t "$efi_part_num:EF00" "$disk" || error_exit "Failed to create EFI partition on $disk."
+            current_start_mib=$((current_start_mib + EFI_PART_SIZE_MIB))
+        fi
+
+        # 2. /boot partition on each disk (will be part of RAID)
+        local boot_size_mb="${BOOT_PART_SIZE_MIB}M"
+        sgdisk -n "$boot_part_num:0:+$boot_size_mb" -t "$boot_part_num:8300" "$disk" || error_exit "Failed to create /boot partition on $disk."
+        current_start_mib=$((current_start_mib + BOOT_PART_SIZE_MIB))
+        
+        # 3. LVM partition on each disk (will be part of RAID, takes rest of disk)
+        sgdisk -n "$lvm_part_num:0:0" -t "$lvm_part_num:8E00" "$disk" || error_exit "Failed to create LVM partition on $disk."
+        partprobe "$disk"
+    done
+
+    # --- Phase 2: Assemble RAID Arrays ---
+    # Create RAID for /boot
+    local md_boot_dev="/dev/md0"
+    local boot_component_devices=()
+    for disk in "${RAID_DEVICES[@]}"; do
+        boot_component_devices+=($(get_partition_path "$disk" "$boot_part_num"))
+    done
+    setup_raid "$raid_level" "$md_boot_dev" "${boot_component_devices[@]}" || error_exit "RAID setup for /boot failed."
+    format_filesystem "$md_boot_dev" "ext4"
+    capture_id_for_config "boot" "$md_boot_dev" "UUID"
+    mkdir -p /mnt/boot || error_exit "Failed to create /mnt/boot."
+    safe_mount "$md_boot_dev" "/mnt/boot"
+
+    # Create RAID for LVM container
+    local md_lvm_dev="/dev/md1"
+    local lvm_component_devices=()
+    for disk in "${RAID_DEVICES[@]}"; do
+        lvm_component_devices+=($(get_partition_path "$disk" "$lvm_part_num"))
+    done
+    setup_raid "$raid_level" "$md_lvm_dev" "${lvm_component_devices[@]}" || error_exit "RAID setup for LVM container failed."
+
+    # --- Phase 3: Setup LVM on the RAID device ---
+    setup_lvm "$md_lvm_dev" "$VG_NAME"
+
+    # --- Phase 4: Mount EFI for initial install ---
+    if [ "$BOOT_MODE" == "uefi" ]; then
+        local first_efi_dev=$(get_partition_path "${RAID_DEVICES[0]}" "$efi_part_num")
+        format_filesystem "$first_efi_dev" "vfat"
+        capture_id_for_config "efi" "$first_efi_dev" "UUID"
+        capture_id_for_config "efi" "$first_efi_dev" "PARTUUID"
+        mkdir -p /mnt/boot/efi || error_exit "Failed to create /mnt/boot/efi."
+        safe_mount "$first_efi_dev" "/mnt/boot/efi"
+    fi
+
+    log_info "Auto RAID LVM partitioning completed successfully."
+}
+
 do_manual_partitioning_guided() {
-    log_warn "You chose manual partitioning. The script will pause for you to set up partitions."
-    log_warn "Please partition '$INSTALL_DISK' (and any other disks) using fdisk, parted, cryptsetup, mdadm, LVM tools."
+    log_info "Starting manual partitioning using fdisk for $INSTALL_DISK"
+    
+    # Check if fdisk is available
+    if ! command -v fdisk &>/dev/null; then
+        error_exit "fdisk is not available. Cannot proceed with manual partitioning."
+    fi
+    
+    log_info "Launching fdisk for manual partitioning of $INSTALL_DISK"
+    log_warn "Manual partitioning instructions:"
+    log_warn "1. Create partitions as needed (root partition is required)"
+    log_warn "2. If using UEFI, create an EFI System Partition (type EF00)"
+    log_warn "3. Set the root partition type to Linux (type 8300)"
+    log_warn "4. Write changes with 'w' and quit fdisk"
+    log_warn "5. The script will then ask you to format and mount partitions"
+    
+    # Launch fdisk
+    fdisk "$INSTALL_DISK" || error_exit "fdisk failed or was cancelled"
+    
+    log_info "fdisk completed. Now you need to format and mount partitions."
     log_warn "You must create and mount the root filesystem at '/mnt'."
     log_warn "If using UEFI, create and mount the EFI System Partition at '/mnt/boot/efi'."
     log_warn "If using LVM, LUKS, or RAID, ensure they are opened/assembled before mounting."
 
-    read -rp "Press Enter when you have finished manual partitioning and mounting to /mnt (and /mnt/boot/efi): "
+    read -rp "Press Enter when you have finished formatting and mounting to /mnt (and /mnt/boot/efi): "
 
     # Verify essential mounts
     if ! mountpoint -q /mnt; then

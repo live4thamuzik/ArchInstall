@@ -400,7 +400,11 @@ gather_installation_details() {
     local strategy_name=""
     case "$PARTITION_SCHEME" in
         auto_simple) strategy_name="Simple" ;;
+        auto_simple_luks) strategy_name="Simple+LUKS" ;;
+        auto_lvm) strategy_name="LVM" ;;
         auto_luks_lvm) strategy_name="LUKS+LVM" ;;
+        auto_raid_simple) strategy_name="RAID+Simple" ;;
+        auto_raid_lvm) strategy_name="RAID+LVM" ;;
         auto_raid_luks_lvm) strategy_name="RAID+LUKS+LVM" ;;
         manual) strategy_name="Manual" ;;
         *) strategy_name="$PARTITION_SCHEME" ;;
@@ -416,6 +420,26 @@ gather_installation_details() {
             WANT_RAID="no"
             prompt_yes_no "Do you want a swap partition?" WANT_SWAP
             prompt_yes_no "Do you want a separate /home partition?" WANT_HOME_PARTITION
+            ;;
+        auto_simple_luks)
+            WANT_ENCRYPTION="yes"
+            WANT_LVM="no"
+            WANT_RAID="no"
+            prompt_yes_no "Do you want a swap partition?" WANT_SWAP
+            prompt_yes_no "Do you want a separate /home partition?" WANT_HOME_PARTITION
+            if get_encryption_password; then
+                LUKS_PASSPHRASE="$ENCRYPTION_PASSWORD"
+                log_success "Encryption password input completed successfully"
+            else
+                error_exit "Encryption password input failed"
+            fi
+            ;;
+        auto_lvm)
+            WANT_ENCRYPTION="no"
+            WANT_LVM="yes"
+            WANT_RAID="no"
+            prompt_yes_no "Do you want a swap Logical Volume?" WANT_SWAP
+            prompt_yes_no "Do you want a separate /home Logical Volume?" WANT_HOME_PARTITION
             ;;
         auto_luks_lvm)
             WANT_ENCRYPTION="yes"
@@ -467,6 +491,70 @@ gather_installation_details() {
             else
                 error_exit "Encryption password input failed"
             fi
+            ;;
+        auto_raid_simple)
+            WANT_RAID="yes"
+            WANT_ENCRYPTION="no"
+            WANT_LVM="no"
+
+            log_warn "RAID device selection requires additional disks. You must select them now."
+            log_info "Available additional disks for RAID:"
+            local i=1
+            local display_other_disks=()
+            for d in "${other_disks_for_raid[@]}"; do
+                display_other_disks+=("($i) $d")
+                i=$((i+1))
+            done
+            select_option "Select additional disk(s) for RAID (space-separated numbers, e.g., '1 3'):" display_other_disks selected_raid_disk_numbers_str
+
+            IFS=' ' read -r -a selected_nums_array <<< "$(trim_string "$selected_raid_disk_numbers_str")"
+            
+            RAID_DEVICES=("$INSTALL_DISK")
+            for num_str in "${selected_nums_array[@]}"; do
+                local index=$((num_str - 1))
+                if (( index >= 0 && index < ${#other_disks_for_raid[@]} )); then
+                    RAID_DEVICES+=("${other_disks_for_raid[$index]}")
+                else
+                    log_warn "Invalid RAID disk number: $num_str. Skipping."
+                fi
+            done
+            if [ ${#RAID_DEVICES[@]} -lt 2 ]; then error_exit "RAID requires at least 2 disks. Please re-run and select more."; fi
+
+            select_option "Select RAID level:" RAID_LEVEL_OPTIONS RAID_LEVEL
+            prompt_yes_no "Do you want a swap partition?" WANT_SWAP
+            prompt_yes_no "Do you want a separate /home partition?" WANT_HOME_PARTITION
+            ;;
+        auto_raid_lvm)
+            WANT_RAID="yes"
+            WANT_ENCRYPTION="no"
+            WANT_LVM="yes"
+
+            log_warn "RAID device selection requires additional disks. You must select them now."
+            log_info "Available additional disks for RAID:"
+            local i=1
+            local display_other_disks=()
+            for d in "${other_disks_for_raid[@]}"; do
+                display_other_disks+=("($i) $d")
+                i=$((i+1))
+            done
+            select_option "Select additional disk(s) for RAID (space-separated numbers, e.g., '1 3'):" display_other_disks selected_raid_disk_numbers_str
+
+            IFS=' ' read -r -a selected_nums_array <<< "$(trim_string "$selected_raid_disk_numbers_str")"
+            
+            RAID_DEVICES=("$INSTALL_DISK")
+            for num_str in "${selected_nums_array[@]}"; do
+                local index=$((num_str - 1))
+                if (( index >= 0 && index < ${#other_disks_for_raid[@]} )); then
+                    RAID_DEVICES+=("${other_disks_for_raid[$index]}")
+                else
+                    log_warn "Invalid RAID disk number: $num_str. Skipping."
+                fi
+            done
+            if [ ${#RAID_DEVICES[@]} -lt 2 ]; then error_exit "RAID requires at least 2 disks. Please re-run and select more."; fi
+
+            select_option "Select RAID level:" RAID_LEVEL_OPTIONS RAID_LEVEL
+            prompt_yes_no "Do you want a swap Logical Volume?" WANT_SWAP
+            prompt_yes_no "Do you want a separate /home Logical Volume?" WANT_HOME_PARTITION
             ;;
         manual)
             log_warn "Manual partitioning selected. You will be guided to perform partitioning steps yourself."
@@ -976,17 +1064,18 @@ prompt_reboot_system() {
 
 # --- Interactive Package Selection Functions ---
 
-# Searches for packages using pacman -Ss and outputs a JSON array
+# Searches for packages using pacman -Ss and outputs simple text format
 search_packages() {
     local search_term="$1"
     
     # Use pacman -Ss to get a list of all packages and their descriptions.
-    # Process the output with a simple approach that uses jq for JSON generation.
+    # Output in pipe-delimited format: name|version|installed|repo|description
     pacman -Ss "$search_term" 2>/dev/null | while IFS= read -r line; do
         if [[ $line =~ ^[a-z]+/ ]]; then
             # This is a package line
             read -r repo_name version installed_flag <<< "$line"
             package_name="${repo_name#*/}"
+            repo="${repo_name%/*}"
             installed="false"
             if [[ "$installed_flag" == "[installed]" ]]; then
                 installed="true"
@@ -996,15 +1085,10 @@ search_packages() {
             read -r description
             description="${description#    }"  # Remove leading spaces
             
-            # Use jq to generate JSON object
-            jq -n --arg name "$package_name" \
-                   --arg version "$version" \
-                   --argjson installed "$installed" \
-                   --arg repo "$repo_name" \
-                   --arg description "$description" \
-                   '{name: $name, version: $version, installed: $installed, repo: $repo, description: $description}'
+            # Output in pipe-delimited format
+            echo "$package_name|$version|$installed|$repo|$description"
         fi
-    done | jq -s '.'
+    done
 
     return $?
 }
@@ -1029,15 +1113,10 @@ search_aur_packages() {
                 read -r description
                 description="${description#    }"  # Remove leading spaces
                 
-                # Use jq to generate JSON object
-                jq -n --arg name "$package_name" \
-                       --arg version "$version" \
-                       --argjson installed "$installed" \
-                       --arg repo "$repo_name" \
-                       --arg description "$description" \
-                       '{name: $name, version: $version, installed: $installed, repo: $repo, description: $description}'
+                # Output in pipe-delimited format
+                echo "$package_name|$version|$installed|aur|$description"
             fi
-        done | jq -s '.'
+        done
     
     elif command -v yay &> /dev/null; then
         yay -Ss "$search_term" 2>/dev/null | while IFS= read -r line; do
@@ -1054,33 +1133,32 @@ search_aur_packages() {
                 read -r description
                 description="${description#    }"  # Remove leading spaces
                 
-                # Use jq to generate JSON object
-                jq -n --arg name "$package_name" \
-                       --arg version "$version" \
-                       --argjson installed "$installed" \
-                       --arg repo "$repo_name" \
-                       --arg description "$description" \
-                       '{name: $name, version: $version, installed: $installed, repo: $repo, description: $description}'
+                # Output in pipe-delimited format
+                echo "$package_name|$version|$installed|aur|$description"
             fi
-        done | jq -s '.'
+        done
     
     else
         # Method 2: Use curl to search AUR web interface (fallback)
         local aur_url="https://aur.archlinux.org/rpc/?v=5&type=search&arg=$search_term"
         
         if command -v curl &> /dev/null; then
-            # Use curl to search AUR API and format as JSON
-            curl -s "$aur_url" | jq -r '.results[] | "NAME=\(.Name)|VERSION=unknown|INSTALLED=false|REPO=aur|DESCRIPTION=\(.Description // "AUR package")"' | \
-            while IFS="|" read -r -a parts; do
-                local name="${parts[0]#NAME=}"
-                local version="${parts[1]#VERSION=}"
-                local installed="${parts[2]#INSTALLED=}"
-                local repo="${parts[3]#REPO=}"
-                local description="${parts[4]#DESCRIPTION=}"
-
-                jq -n --arg name "$name" --arg version "$version" --arg installed "$installed" --arg repo "$repo" --arg description "$description" \
-                   '{name: $name, version: $version, installed: ($installed == "true"), repo: $repo, description: $description}'
-            done | jq -s '.'
+            # Use curl to search AUR API - output simple format
+            curl -s "$aur_url" | while IFS= read -r line; do
+                # Simple parsing of AUR API response (basic approach without jq)
+                if [[ "$line" =~ \"Name\":\"([^\"]+)\" ]]; then
+                    local name="${BASH_REMATCH[1]}"
+                    local version="unknown"
+                    local description="AUR package"
+                    
+                    # Try to extract description if available
+                    if [[ "$line" =~ \"Description\":\"([^\"]+)\" ]]; then
+                        description="${BASH_REMATCH[1]}"
+                    fi
+                    
+                    echo "$name|$version|false|aur|$description"
+                fi
+            done
         else
             echo "Neither AUR helper nor curl available for AUR search."
             echo "Please install an AUR helper (yay/paru) or curl first."

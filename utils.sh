@@ -30,6 +30,83 @@ tui_progress() {
     log_message "INFO" "TUI Progress: $phase ($progress%) - $message"
 }
 
+# Boot mode detection functions
+detect_boot_mode() {
+    # Check if we're running in UEFI mode
+    if [ -d "/sys/firmware/efi/efivars" ]; then
+        echo "uefi"
+    else
+        echo "bios"
+    fi
+}
+
+# Apply boot mode override if specified
+apply_boot_mode_override() {
+    local override_mode="${BOOT_MODE_OVERRIDE:-auto}"
+    
+    case "$override_mode" in
+        "auto")
+            # Use detected boot mode
+            BOOT_MODE=$(detect_boot_mode)
+            log_info "Using auto-detected boot mode: $BOOT_MODE"
+            ;;
+        "uefi")
+            BOOT_MODE="uefi"
+            log_info "Forcing UEFI boot mode"
+            ;;
+        "bios")
+            BOOT_MODE="bios"
+            log_info "Forcing BIOS boot mode"
+            ;;
+        *)
+            log_warn "Unknown boot mode override: $override_mode, using auto-detection"
+            BOOT_MODE=$(detect_boot_mode)
+            ;;
+    esac
+    
+    # Export for use in other scripts
+    export BOOT_MODE
+    log_info "Boot mode set to: $BOOT_MODE"
+}
+
+# CPU microcode detection and installation
+detect_cpu_microcode() {
+    # Detect CPU vendor
+    local cpu_vendor
+    cpu_vendor=$(grep -m1 "vendor_id" /proc/cpuinfo | cut -d: -f2 | tr -d ' ')
+    
+    case "$cpu_vendor" in
+        "GenuineIntel")
+            echo "intel-ucode"
+            ;;
+        "AuthenticAMD")
+            echo "amd-ucode"
+            ;;
+        *)
+            log_warn "Unknown CPU vendor: $cpu_vendor, skipping microcode"
+            echo "none"
+            ;;
+    esac
+}
+
+# Install CPU microcode
+install_cpu_microcode() {
+    local microcode_package
+    microcode_package=$(detect_cpu_microcode)
+    
+    if [ "$microcode_package" != "none" ]; then
+        # Check if microcode package is already installed
+        if ! pacman -Q "$microcode_package" &>/dev/null; then
+            log_info "Installing CPU microcode: $microcode_package"
+            pacman -S --noconfirm --needed "$microcode_package" || log_warn "Failed to install $microcode_package"
+        else
+            log_info "CPU microcode $microcode_package is already installed"
+        fi
+    else
+        log_info "No microcode installation needed"
+    fi
+}
+
 # Helper functions for common progress updates
 tui_progress_update() {
     local phase="$1"
@@ -344,6 +421,28 @@ wipe_disk() {
     log_info "Disk $disk_path wiped."
 }
 
+# Wait for a partition to be recognized by the kernel
+# Args: $1 = partition_path (e.g., /dev/sda1)
+wait_for_partition() {
+    local partition_path="$1"
+    local max_wait=10
+    local wait_count=0
+    
+    log_info "Waiting for partition $partition_path to be recognized..."
+    
+    while [ $wait_count -lt $max_wait ]; do
+        if [ -b "$partition_path" ]; then
+            log_info "Partition $partition_path is now available"
+            return 0
+        fi
+        log_info "Partition $partition_path not yet available, waiting... ($((wait_count + 1))/$max_wait)"
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+    
+    error_exit "Partition $partition_path was not recognized after ${max_wait} seconds"
+}
+
 # Formats a device with a specified filesystem.
 # Args: $1 = dev_path, $2 = fs_type (e.g., "ext4", "vfat", "swap")
 format_filesystem() {
@@ -351,6 +450,10 @@ format_filesystem() {
     local fs_type="$2"
 
     log_info "Formatting $dev_path as $fs_type..."
+    
+    # Wait for partition to be available before formatting
+    wait_for_partition "$dev_path"
+    
     case "$fs_type" in
         ext4)   mkfs.ext4 -F "$dev_path" || error_exit "Failed to format $dev_path as ext4.";;
         xfs)    mkfs.xfs -f "$dev_path" || error_exit "Failed to format $dev_path as xfs.";;
@@ -954,9 +1057,18 @@ edit_file_in_chroot() {
 # Uses systemctl enable to set service for auto-start on boot
 enable_systemd_service_chroot() {
     local service_name="$1"
-    log_info "Enabling systemd service $service_name inside chroot..."
-    systemctl enable "$service_name" || error_exit "Failed to enable service $service_name inside chroot."
-    log_info "Service $service_name enabled."
+    
+    # Check if service is already enabled
+    if ! systemctl is-enabled "$service_name" &>/dev/null; then
+        log_info "Enabling systemd service $service_name inside chroot..."
+        if systemctl enable "$service_name"; then
+            log_success "Service $service_name enabled successfully."
+        else
+            error_exit "Failed to enable service $service_name inside chroot."
+        fi
+    else
+        log_info "Service $service_name is already enabled."
+    fi
 }
 
 # --- Security / Credential Handling ---
@@ -1002,12 +1114,213 @@ secure_password_input() {
     done
 }
 
+# --- Logging Configuration ---
+# Enhanced logging with automatic log file creation and backup
+setup_logging() {
+    # Create log directory if it doesn't exist
+    mkdir -p "$(dirname "$LOG_FILE")"
+    
+    # Initialize primary log file with header
+    {
+        echo "=========================================="
+        echo "ArchInstall Log - $(date)"
+        echo "System: $(uname -a)"
+        echo "User: $(whoami)"
+        echo "Working Directory: $(pwd)"
+        echo "=========================================="
+        echo ""
+    } > "$LOG_FILE"
+    
+    # Create backup log file (always accessible)
+    cp "$LOG_FILE" "$LOG_BACKUP"
+    
+    log_info "Logging initialized: $LOG_FILE"
+    log_info "Backup log available at: $LOG_BACKUP"
+    log_info "Log files will be preserved for troubleshooting"
+}
+
+# Function to ensure log files are always accessible
+preserve_logs() {
+    local status="$1"  # "success", "failure", or "interrupted"
+    
+    log_info "Preserving log files for user access..."
+    
+    # Always copy to backup location
+    if [[ -f "$LOG_FILE" ]]; then
+        cp "$LOG_FILE" "$LOG_BACKUP"
+        log_info "Log backup created: $LOG_BACKUP"
+    fi
+    
+    # Copy to installed system if mounted
+    if [[ -d "/mnt" ]] && mountpoint -q "/mnt"; then
+        mkdir -p "/mnt/var/log"
+        if [[ -f "$LOG_FILE" ]]; then
+            cp "$LOG_FILE" "$LOG_FINAL"
+            log_info "Log copied to installed system: $LOG_FINAL"
+        fi
+    fi
+    
+    # Create a summary file with key information
+    local summary_file="/tmp/archinstall-summary.txt"
+    {
+        echo "=========================================="
+        echo "ArchInstall Summary - $(date)"
+        echo "=========================================="
+        echo "Status: $status"
+        echo "Primary Log: $LOG_FILE"
+        echo "Backup Log: $LOG_BACKUP"
+        if [[ -f "$LOG_FINAL" ]]; then
+            echo "Installed System Log: $LOG_FINAL"
+        fi
+        echo ""
+        echo "To view logs:"
+        echo "  cat $LOG_BACKUP"
+        echo "  tail -f $LOG_BACKUP"
+        echo ""
+        if [[ "$status" == "failure" ]]; then
+            echo "Installation failed. Check the logs above for details."
+            echo "Common issues:"
+            echo "  - Internet connection problems"
+            echo "  - Disk space issues"
+            echo "  - Invalid user input"
+            echo "  - Hardware compatibility"
+        elif [[ "$status" == "success" ]]; then
+            echo "Installation completed successfully!"
+            echo "Logs have been preserved for your reference."
+        fi
+        echo "=========================================="
+    } > "$summary_file"
+    
+    log_info "Summary file created: $summary_file"
+}
+
+# Function to display log access information
+show_log_access() {
+    echo ""
+    echo "=========================================="
+    echo "📋 LOG FILE ACCESS INFORMATION"
+    echo "=========================================="
+    echo "Primary Log:    $LOG_FILE"
+    echo "Backup Log:     $LOG_BACKUP"
+    echo "Summary File:   /tmp/archinstall-summary.txt"
+    if [[ -d "/mnt" ]] && mountpoint -q "/mnt"; then
+        echo "Installed Log:  $LOG_FINAL"
+    fi
+    echo ""
+    echo "📖 To view logs:"
+    echo "  cat $LOG_BACKUP"
+    echo "  tail -f $LOG_BACKUP"
+    echo "  less $LOG_BACKUP"
+    echo ""
+    echo "📋 To view summary:"
+    echo "  cat /tmp/archinstall-summary.txt"
+    echo ""
+    echo "=========================================="
+}
+
 # --- General Utility / String Manipulation ---
 
 # Trims leading/trailing whitespace from a string.
 trim_string() {
     local s="$1"
     echo "$s" | xargs
+}
+
+# --- Security Functions ---
+# Validates and sanitizes usernames to prevent command injection
+validate_username() {
+    local username="$1"
+    local context="$2"
+    
+    # Check if username is empty
+    if [ -z "$username" ]; then
+        log_error "Username validation failed for $context: Username is empty"
+        return 1
+    fi
+    
+    # Check length (Linux usernames should be 1-32 characters)
+    if [ ${#username} -lt 1 ] || [ ${#username} -gt 32 ]; then
+        log_error "Username validation failed for $context: Username length invalid (${#username} chars, must be 1-32)"
+        return 1
+    fi
+    
+    # Check for valid characters (alphanumeric, underscore, dash, dot - no spaces or special chars)
+    if ! echo "$username" | grep -qE '^[a-zA-Z0-9._-]+$'; then
+        log_error "Username validation failed for $context: Invalid characters in username '$username'"
+        log_error "Usernames may only contain letters, numbers, underscores, dashes, and dots"
+        return 1
+    fi
+    
+    # Check that username doesn't start with a dash or dot
+    if echo "$username" | grep -qE '^[-.]'; then
+        log_error "Username validation failed for $context: Username cannot start with dash or dot: '$username'"
+        return 1
+    fi
+    
+    log_info "Username validation passed for $context: '$username'"
+    return 0
+}
+
+# Validates and sanitizes hostnames to prevent command injection
+validate_hostname() {
+    local hostname="$1"
+    local context="$2"
+    
+    # Check if hostname is empty
+    if [ -z "$hostname" ]; then
+        log_error "Hostname validation failed for $context: Hostname is empty"
+        return 1
+    fi
+    
+    # Check length (hostnames should be 1-253 characters)
+    if [ ${#hostname} -lt 1 ] || [ ${#hostname} -gt 253 ]; then
+        log_error "Hostname validation failed for $context: Hostname length invalid (${#hostname} chars, must be 1-253)"
+        return 1
+    fi
+    
+    # Check for valid characters (alphanumeric, dash, dot - no spaces or special chars)
+    if ! echo "$hostname" | grep -qE '^[a-zA-Z0-9.-]+$'; then
+        log_error "Hostname validation failed for $context: Invalid characters in hostname '$hostname'"
+        log_error "Hostnames may only contain letters, numbers, dashes, and dots"
+        return 1
+    fi
+    
+    # Check that hostname doesn't start or end with a dash or dot
+    if echo "$hostname" | grep -qE '^[-.]|[-.]$'; then
+        log_error "Hostname validation failed for $context: Hostname cannot start or end with dash or dot: '$hostname'"
+        return 1
+    fi
+    
+    log_info "Hostname validation passed for $context: '$hostname'"
+    return 0
+}
+
+# Validates disk device paths to prevent command injection
+validate_disk_device() {
+    local device="$1"
+    local context="$2"
+    
+    # Check if device is empty
+    if [ -z "$device" ]; then
+        log_error "Device validation failed for $context: Device path is empty"
+        return 1
+    fi
+    
+    # Check for valid device path format
+    if ! echo "$device" | grep -qE '^/dev/(sd[a-z]+|hd[a-z]+|vd[a-z]+|nvme[0-9]+n[0-9]+)$'; then
+        log_error "Device validation failed for $context: Invalid device path format: '$device'"
+        log_error "Device paths must be in format: /dev/sdX, /dev/hdX, /dev/vdX, or /dev/nvmeXnY"
+        return 1
+    fi
+    
+    # Check that device exists and is a block device
+    if [ ! -b "$device" ]; then
+        log_error "Device validation failed for $context: Device does not exist or is not a block device: '$device'"
+        return 1
+    fi
+    
+    log_info "Device validation passed for $context: '$device'"
+    return 0
 }
 
 # Saves the current configuration variables to a file.
@@ -1210,7 +1523,20 @@ install_systemd_bootloader() {
     fi
     
     # Install systemd-boot - match working approach from previous project
-    bootctl install || error_exit "systemd-boot installation failed"
+    log_info "Installing systemd-boot..."
+    if ! bootctl install; then
+        local exit_code=$?
+        log_error "bootctl install failed with exit code: $exit_code"
+        log_error "Failed to install systemd-boot"
+        log_error "This could be due to:"
+        log_error "  - EFI partition not properly mounted at /boot/efi"
+        log_error "  - Insufficient space on EFI partition"
+        log_error "  - Invalid EFI partition format (must be FAT32)"
+        log_error "  - Missing systemd-boot package"
+        log_error "  - Insufficient permissions on EFI partition"
+        log_error "Please verify EFI partition is mounted and accessible"
+        error_exit "systemd-boot installation failed"
+    fi
     
     # Create boot entry
     create_systemd_boot_entry || error_exit "Failed to create systemd-boot entry"
@@ -1257,7 +1583,15 @@ configure_secure_boot_chroot() {
     
     # Sign the kernel
     log_info "Signing kernel..."
-    sbctl sign /boot/vmlinuz-linux || log_warn "Failed to sign kernel"
+    if [ "$KERNEL_TYPE" == "linux" ]; then
+        sbctl sign /boot/vmlinuz-linux || log_warn "Failed to sign kernel"
+    elif [ "$KERNEL_TYPE" == "linux-lts" ]; then
+        sbctl sign /boot/vmlinuz-linux-lts || log_warn "Failed to sign kernel"
+    elif [ "$KERNEL_TYPE" == "linux-zen" ]; then
+        sbctl sign /boot/vmlinuz-linux-zen || log_warn "Failed to sign kernel"
+    elif [ "$KERNEL_TYPE" == "linux-hardened" ]; then
+        sbctl sign /boot/vmlinuz-linux-hardened || log_warn "Failed to sign kernel"
+    fi
     
     # Sign microcode if present
     if [ -f "/boot/intel-ucode.img" ]; then
@@ -1270,7 +1604,15 @@ configure_secure_boot_chroot() {
     
     # Sign initramfs
     log_info "Signing initramfs..."
-    sbctl sign /boot/initramfs-linux.img || log_warn "Failed to sign initramfs"
+    if [ "$KERNEL_TYPE" == "linux" ]; then
+        sbctl sign /boot/initramfs-linux.img || log_warn "Failed to sign initramfs"
+    elif [ "$KERNEL_TYPE" == "linux-lts" ]; then
+        sbctl sign /boot/initramfs-linux-lts.img || log_warn "Failed to sign initramfs"
+    elif [ "$KERNEL_TYPE" == "linux-zen" ]; then
+        sbctl sign /boot/initramfs-linux-zen.img || log_warn "Failed to sign initramfs"
+    elif [ "$KERNEL_TYPE" == "linux-hardened" ]; then
+        sbctl sign /boot/initramfs-linux-hardened.img || log_warn "Failed to sign initramfs"
+    fi
     
     # Install Secure Boot keys to EFI
     log_info "Installing Secure Boot keys to EFI..."
@@ -1441,9 +1783,9 @@ EOF
     # Create loader entry
     cat > "$loader_entry" << EOF
 title   Arch Linux
-linux   /vmlinuz-linux
+linux   /vmlinuz-$KERNEL_TYPE
 $microcode_initrd
-initrd  /initramfs-linux.img
+initrd  /initramfs-$KERNEL_TYPE.img
 options $cmdline_params
 EOF
     
@@ -1775,38 +2117,15 @@ suggest_mirror_country_from_timezone() {
     echo "$suggested_country"
 }
 
-# Configures mirrors using reflector
-configure_mirrors_live() {
-    local country_code="$1"
-    log_info "Configuring mirrors for country: $country_code"
-    
-    # Install reflector if not present
-    if ! command -v reflector &>/dev/null; then
-        pacman -Sy reflector --noconfirm || error_exit "Failed to install reflector"
-    fi
-    
-    # Update mirrorlist with reflector
-    reflector --country "$country_code" --age 12 --protocol https --sort rate --save /etc/pacman.d/mirrorlist || error_exit "Failed to update mirrorlist"
-    
-    log_info "Mirror configuration complete."
-}
-
-# Generates fstab file
-generate_fstab() {
-    log_info "Generating fstab file..."
-    genfstab -U /mnt >> /mnt/etc/fstab || error_exit "Failed to generate fstab"
-    
-    # Verify fstab was created and has content
-    if [ ! -s /mnt/etc/fstab ]; then
-        error_exit "Generated fstab file is empty"
-    fi
-    
-    log_info "Fstab generation complete."
-}
 
 # Configures system hostname and hosts file
 configure_hostname_chroot() {
     log_info "Configuring system hostname: $SYSTEM_HOSTNAME"
+    
+    # Validate hostname to prevent command injection
+    if ! validate_hostname "$SYSTEM_HOSTNAME" "hostname configuration"; then
+        error_exit "Invalid hostname provided"
+    fi
     
     # Set hostname
     echo "$SYSTEM_HOSTNAME" > /etc/hostname || error_exit "Failed to set hostname"
@@ -2038,7 +2357,19 @@ configure_mkinitcpio_hooks_chroot() {
     sed -i "s/^HOOKS=.*/HOOKS=\"$hooks\"/" "/etc/mkinitcpio.conf"
     
     # Regenerate initramfs (single regeneration for all hooks)
-    mkinitcpio -P || error_exit "Failed to regenerate initramfs"
+    log_info "Regenerating initramfs with hooks: $hooks"
+    if ! mkinitcpio -P; then
+        local exit_code=$?
+        log_error "mkinitcpio failed with exit code: $exit_code"
+        log_error "Failed to regenerate initramfs with hooks: $hooks"
+        log_error "This could be due to:"
+        log_error "  - Missing kernel modules or firmware"
+        log_error "  - Invalid hook configuration"
+        log_error "  - Insufficient disk space"
+        log_error "  - Corrupted kernel or initramfs files"
+        log_error "Check /var/log/mkinitcpio.log for detailed error information"
+        error_exit "Failed to regenerate initramfs"
+    fi
     log_info "mkinitcpio hooks configured and initramfs regenerated."
 }
 
@@ -2109,6 +2440,12 @@ enable_multilib_chroot() {
 install_aur_helper_chroot() {
     log_info "Installing AUR helper: $AUR_HELPER_CHOICE"
     if [ "$WANT_AUR_HELPER" == "yes" ]; then
+        # Check if AUR helper is already installed
+        if command -v "$AUR_HELPER_CHOICE" &>/dev/null; then
+            log_info "AUR helper '$AUR_HELPER_CHOICE' is already installed, skipping installation"
+            return 0
+        fi
+        
         # Install dependencies first
         install_packages_chroot "base-devel git" || error_exit "Failed to install AUR helper dependencies"
         
@@ -2315,7 +2652,18 @@ configure_numlock_chroot() {
             fi
             
             log_info "Regenerating initramfs with numlock support..."
-            mkinitcpio -P || error_exit "Failed to regenerate initramfs with numlock support"
+            if ! mkinitcpio -P; then
+                local exit_code=$?
+                log_error "mkinitcpio failed with exit code: $exit_code"
+                log_error "Failed to regenerate initramfs with numlock support"
+                log_error "This could be due to:"
+                log_error "  - mkinitcpio-numlock package not properly installed"
+                log_error "  - Invalid numlock hook configuration"
+                log_error "  - Insufficient disk space"
+                log_error "  - Corrupted kernel or initramfs files"
+                log_error "Check /var/log/mkinitcpio.log for detailed error information"
+                error_exit "Failed to regenerate initramfs with numlock support"
+            fi
             
             log_info "Numlock on boot configured successfully - will be enabled system-wide"
         else
@@ -2418,49 +2766,6 @@ install_custom_packages_chroot() {
     fi
 }
 
-# Install custom AUR packages in chroot environment
-install_custom_aur_packages_chroot() {
-    local aur_packages_to_install=""
-    
-    # Add user-selected custom AUR packages
-    if [ "$INSTALL_CUSTOM_AUR_PACKAGES" == "yes" ] && [ -n "$CUSTOM_AUR_PACKAGES" ]; then
-        aur_packages_to_install="$CUSTOM_AUR_PACKAGES"
-    fi
-    
-    # Add btrfs-assistant if user wants it
-    if [ "$WANT_BTRFS_ASSISTANT" == "yes" ]; then
-        if [ -n "$aur_packages_to_install" ]; then
-            aur_packages_to_install="$aur_packages_to_install btrfs-assistant"
-        else
-            aur_packages_to_install="btrfs-assistant"
-        fi
-    fi
-    
-    if [ -n "$aur_packages_to_install" ]; then
-        log_info "Installing AUR packages: $aur_packages_to_install"
-        
-        # Check if AUR helper is available
-        if [ "$WANT_AUR_HELPER" == "yes" ] && [ -n "$AUR_HELPER_CHOICE" ]; then
-            # Install AUR packages using the selected helper
-            case "$AUR_HELPER_CHOICE" in
-                "yay")
-                    sudo -u "$MAIN_USERNAME" yay -S --noconfirm $aur_packages_to_install || error_exit "AUR packages installation failed with yay"
-                    ;;
-                "paru")
-                    sudo -u "$MAIN_USERNAME" paru -S --noconfirm $aur_packages_to_install || error_exit "AUR packages installation failed with paru"
-                    ;;
-                *)
-                    error_exit "Unknown AUR helper: $AUR_HELPER_CHOICE"
-                    ;;
-            esac
-            log_info "AUR packages installed successfully"
-        else
-            log_warn "AUR helper not available, skipping AUR packages installation"
-        fi
-    else
-        log_info "No AUR packages to install"
-    fi
-}
 
 # --- Btrfs Snapshot Configuration Functions ---
 # Configure Btrfs snapshots with snapper in chroot environment
@@ -2665,14 +2970,51 @@ create_user() {
         return 1
     fi
     
-    log_info "Creating user account: $username"
-    
-    if useradd -m -G wheel,power,storage,uucp,network -s /bin/bash "$username"; then
-        log_success "User account created successfully: $username"
-        return 0
-    else
-        log_error "Failed to create user account: $username (exit code: $?)"
+    # Validate username to prevent command injection
+    if ! validate_username "$username" "user creation"; then
         return 1
+    fi
+    
+    # Check if user already exists
+    if ! id "$username" &>/dev/null; then
+        log_info "User '$username' does not exist. Creating with groups: wheel,power,storage,uucp,network..."
+        if useradd -m -G wheel,power,storage,uucp,network -s /bin/bash "$username"; then
+            log_success "User account created successfully: $username"
+            return 0
+        else
+            log_error "Failed to create user account: $username (exit code: $?)"
+            return 1
+        fi
+    else
+        log_info "User '$username' already exists. Verifying group membership..."
+        
+        # Verify all required groups are present
+        local required_groups="wheel,power,storage,uucp,network"
+        local missing_groups=""
+        
+        IFS=',' read -ra groups <<< "$required_groups"
+        for group in "${groups[@]}"; do
+            if ! groups "$username" | grep -q "\b$group\b"; then
+                if [ -z "$missing_groups" ]; then
+                    missing_groups="$group"
+                else
+                    missing_groups="$missing_groups,$group"
+                fi
+            fi
+        done
+        
+        if [ -n "$missing_groups" ]; then
+            log_info "Adding missing groups to existing user: $missing_groups"
+            if usermod -a -G "$missing_groups" "$username"; then
+                log_success "Added missing groups to user: $username"
+            else
+                log_error "Failed to add groups to existing user: $username"
+                return 1
+            fi
+        else
+            log_success "User '$username' exists with all required groups"
+        fi
+        return 0
     fi
 }
 
@@ -2731,22 +3073,32 @@ set_passwords() {
 update_sudoers() {
     log_info "Configuring sudoers file..."
     
-    # Create backup of original sudoers file
-    if ! cp /etc/sudoers /etc/sudoers.backup; then
-        log_error "Failed to create sudoers backup"
-        return 1
+    # Create backup of original sudoers file (only if backup doesn't exist)
+    if [ ! -f /etc/sudoers.backup ]; then
+        if ! cp /etc/sudoers /etc/sudoers.backup; then
+            log_error "Failed to create sudoers backup"
+            return 1
+        fi
+        log_info "Created sudoers backup"
+    else
+        log_info "sudoers backup already exists, skipping backup creation"
     fi
     
-    # Uncomment the wheel group line in sudoers
+    # Uncomment the wheel group line in sudoers (idempotent - sed won't change if already uncommented)
     if ! sed -i 's/^# *%wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers; then
         log_error "Failed to uncomment wheel group in sudoers"
         return 1
     fi
     
-    # Add targetpw default for password prompting
-    if ! echo 'Defaults targetpw' >> /etc/sudoers; then
-        log_error "Failed to add targetpw default to sudoers"
-        return 1
+    # Add targetpw default for password prompting (only if not already present)
+    if ! grep -q '^Defaults targetpw' /etc/sudoers; then
+        if ! echo 'Defaults targetpw' >> /etc/sudoers; then
+            log_error "Failed to add targetpw default to sudoers"
+            return 1
+        fi
+        log_info "Added targetpw default to sudoers"
+    else
+        log_info "targetpw default already present in sudoers"
     fi
     
     # Validate sudoers file syntax

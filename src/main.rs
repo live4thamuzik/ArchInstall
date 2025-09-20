@@ -29,7 +29,7 @@ pub struct Package {
 }
 
 // Structured communication protocol between TUI and Bash scripts
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum InstallationPhase {
     Prerequisites,
     UserInput,
@@ -43,7 +43,7 @@ pub enum InstallationPhase {
     Complete,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MessageType {
     Progress,
     Status,
@@ -106,12 +106,13 @@ impl ProgressUpdate {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PopupType {
     None,
     DiskSelection,
     PartitioningStrategy,
     DesktopEnvironment,
+    DisplayManager,
     Encryption,
     Multilib,
     AURHelper,
@@ -124,9 +125,29 @@ pub enum PopupType {
     GPUDrivers,
     Plymouth,
     PlymouthTheme,
-    ManualPartitioning,
+    RAIDLevel,
     PackageSelection, // Simple bash session for package selection
     TextInput(String), // Field name
+    // New popup types for missing configuration options
+    WiFi,
+    WiFiSession, // Interactive iwctl session
+    BootOverride,
+    SecureBoot,
+    RootFilesystem,
+    HomePartition,
+    HomeFilesystem,
+    Swap,
+    BtrfsSnapshots,
+    BtrfsFrequency,
+    BtrfsKeep,
+    BtrfsAssistant,
+    TimeSync,
+    Mirror,
+    Kernel,
+    Flatpak,
+    OSProber,
+    Numlock,
+    GitRepository,
 }
 
 #[derive(Debug, Clone)]
@@ -291,7 +312,7 @@ impl FloatContent for PackageSelection {
         let block = Block::new().borders(Borders::ALL)
             .title(title)
             .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-            .title_bottom("Type commands, Enter to execute, Ctrl-C to exit")
+            .title_bottom("Type commands, Enter to execute, Esc to exit")
             .style(Style::default().bg(Color::Black).fg(Color::White));
 
         let inner_area = Rect {
@@ -439,7 +460,7 @@ impl FloatContent for PackageSelection {
                     }
                     return false;
                 }
-                KeyCode::Char('q') => {
+                KeyCode::Esc => {
                     // Exit search results view
                     self.show_search_results = false;
                     self.search_results.clear();
@@ -490,21 +511,29 @@ impl FloatContent for PackageSelection {
                                         if results.is_empty() {
                                             self.output_lines.push(format!("No packages found matching: {}", term));
                                         } else {
-                                            // The bash script should output clean JSON
-                                            let json_output = results.join("\n");
+                                            // Parse pipe-delimited format: name|version|installed|repo|description
+                                            let mut packages = Vec::new();
+                                            for line in results {
+                                                let parts: Vec<&str> = line.split('|').collect();
+                                                if parts.len() >= 5 {
+                                                    let package = Package {
+                                                        name: parts[0].to_string(),
+                                                        version: parts[1].to_string(),
+                                                        installed: parts[2] == "true",
+                                                        repo: parts[3].to_string(),
+                                                        description: parts[4].to_string(),
+                                                    };
+                                                    packages.push(package);
+                                                }
+                                            }
                                             
-                                            match serde_json::from_str::<Vec<Package>>(&json_output) {
-                                                Ok(packages) => {
+                                            if !packages.is_empty() {
                                                     self.search_results = packages;
                                                     self.show_search_results = true;
                                                     self.list_state.select(Some(0));
-                                                    self.output_lines.push(format!("Found {} packages. Use ↑↓ to navigate, Enter to add, 'q' to exit", self.search_results.len()));
-                                                }
-                                                Err(e) => {
-                                                    self.output_lines.push(format!("JSON parsing error: {}", e));
-                                                    self.output_lines.push("Raw output:".to_string());
-                                                    self.output_lines.extend(results);
-                                                }
+                                                self.output_lines.push(format!("Found {} packages. Use ↑↓ to navigate, Enter to add, Esc to exit", self.search_results.len()));
+                                            } else {
+                                                self.output_lines.push(format!("No packages found matching: {}", term));
                                             }
                                         }
                                     }
@@ -621,7 +650,7 @@ impl FloatContent for PackageSelection {
             ]))
         } else {
             ("Package Selection", Box::new([
-                Shortcut { keys: vec!["Ctrl-C".to_string()], description: "Exit selection".to_string() },
+                Shortcut { keys: vec!["Esc".to_string()], description: "Exit selection".to_string() },
                 Shortcut { keys: vec!["Enter".to_string()], description: "Execute command".to_string() },
             ]))
         }
@@ -664,28 +693,66 @@ impl Default for InstallerState {
             is_configuring: true,
             config_step: 0,
             config_values: vec![
-                String::new(),  // Username
-                String::new(),  // User password
-                String::new(),  // Root password
-                String::new(),  // Hostname
-                String::new(),  // Disk
-                String::new(),  // Partitioning strategy
-                String::new(),  // Desktop environment
-                String::new(),  // Display manager
-                String::new(),  // Encryption
-                String::new(),  // Multilib
-                String::new(),  // AUR helper
-                String::new(),  // Timezone region
-                String::new(),  // Timezone
-                String::new(),  // Locale
-                String::new(),  // Keymap
-                String::new(),  // Bootloader
-                String::new(),  // GRUB theme
-                String::new(),  // GPU drivers
-                String::new(),  // Plymouth
-                String::new(),  // Plymouth theme
-                String::new(),  // Pacman packages
-                String::new(),  // AUR packages
+                // Boot Setup (0-1)
+                String::new(),  // 0: Boot mode
+                String::new(),  // 1: Secure boot
+                
+                // System Locale and Input (2-3)
+                String::new(),  // 2: Locale
+                String::new(),  // 3: Keymap
+                
+                // Disk and Storage (4-14)
+                String::new(),  // 4: Disk
+                String::new(),  // 5: Partitioning strategy
+                String::new(),  // 6: Encryption
+                String::new(),  // 7: Root filesystem
+                String::new(),  // 8: Separate home partition
+                String::new(),  // 9: Home filesystem
+                String::new(),  // 10: Swap
+                String::new(),  // 11: Btrfs snapshots
+                String::new(),  // 12: Btrfs frequency
+                String::new(),  // 13: Btrfs keep count
+                String::new(),  // 14: Btrfs assistant
+                
+                // Time and Location (15-17)
+                String::new(),  // 15: Timezone Region
+                String::new(),  // 16: Timezone
+                String::new(),  // 17: Time sync (ntp)
+                
+                // System Packages (18-22)
+                String::new(),  // 18: Mirror country
+                String::new(),  // 19: Kernel
+                String::new(),  // 20: Multilib
+                String::new(),  // 21: Additional pacman packages
+                String::new(),  // 22: GPU drivers
+                
+                // Hostname (23) - moved between GPU drivers and username
+                String::new(),  // 23: Hostname
+                
+                // User Setup (24-26)
+                String::new(),  // 24: Username
+                String::new(),  // 25: User password
+                String::new(),  // 26: Root password
+                
+                // Package Management (27-29)
+                String::new(),  // 27: AUR helper
+                String::new(),  // 28: Additional AUR packages
+                String::new(),  // 29: Flatpak
+                
+                // Boot Configuration (30-32)
+                String::new(),  // 30: Bootloader
+                String::new(),  // 31: OS prober
+                String::new(),  // 32: GRUB theme
+                
+                // Desktop Environment (33-34)
+                String::new(),  // 33: Desktop environment
+                String::new(),  // 34: Display manager
+                
+                // Boot Splash and Final Setup (35-38)
+                String::new(),  // 35: Plymouth
+                String::new(),  // 36: Plymouth theme
+                String::new(),  // 37: Numlock on boot
+                String::new(),  // 38: Git repository
             ],
             current_input: String::new(),
             input_mode: false,
@@ -758,70 +825,25 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
             match crossterm::event::read()? {
                 Event::Key(KeyEvent { code, modifiers, .. }) => {
                     match code {
-                        KeyCode::Char('q') | KeyCode::Esc => {
+                        KeyCode::Char('q') => {
+                            // 'q' quits the installer from main screen
+                            return Ok(());
+                        }
+                        KeyCode::Esc => {
                             let mut state = app_state.lock().unwrap();
                             
-                            // If a floating window is active, let it handle the key first
-                            if state.is_configuring {
-                                match &mut state.focus {
-                                    Focus::FloatingWindow(float) => {
-                                        let key_event = KeyEvent { 
-                                            code, 
-                                            modifiers, 
-                                            kind: crossterm::event::KeyEventKind::Press, 
-                                            state: crossterm::event::KeyEventState::NONE 
-                                        };
-                                        if float.handle_key_event(&key_event) {
+                            // 'Esc' returns to main menu from a popup
+                            if state.popup.is_active {
+                                            state.popup.is_active = false;
+                                            state.popup.popup_type = PopupType::None;
+                                state.popup.options.clear();
+                                state.popup.title.clear();
+                                state.popup.selected_index = 0;
+                            } else if matches!(state.focus, Focus::FloatingWindow(_)) {
+                                // Return to main focus from floating windows
                                             state.focus = Focus::Configuration;
-                                        }
-                                        continue; // Don't quit the TUI, let the floating window handle it
-                                    }
-                                    Focus::Configuration => {
-                                        // Only quit if we're on the main configuration screen
-                                        break;
-                                    }
-                                }
-                            } else {
-                                // Always allow quit from main menu
-                                break;
                             }
-                        }
-                        KeyCode::Char('s') => {
-                            let mut state = app_state.lock().unwrap();
-                            if state.is_configuring {
-                                match &mut state.focus {
-                                    Focus::FloatingWindow(float) => {
-                                        // Pass 's' to floating window
-                                        let key_event = KeyEvent { 
-                                            code: KeyCode::Char('s'), 
-                                            modifiers, 
-                                            kind: crossterm::event::KeyEventKind::Press, 
-                                            state: crossterm::event::KeyEventState::NONE 
-                                        };
-                                        if float.handle_key_event(&key_event) {
-                                            state.focus = Focus::Configuration;
-                                        }
-                                    }
-                                    Focus::Configuration => {
-                                        if state.editing_field.is_none() && !state.popup.is_active {
-                                            // Start configuration process
-                                            state.is_configuring = false;
-                                            state.is_running = true;
-                                            state.current_phase = "Starting Installation".to_string();
-                                            state.status_message = "Launching installer with configuration...".to_string();
-                                            state.progress = 10;
-                                            
-                                            // Start the installer with configuration
-                                            let config_values = state.config_values.clone();
-                                            drop(state); // Release lock before spawning thread
-                                            start_installer_with_config(Arc::clone(&app_state), config_values);
-                                        } else if state.editing_field.is_some() {
-                                            // Handle 's' as text input when editing a field
-                                            state.current_input.push('s');
-                                        }
-                                    }
-                                }
-                            }
+                            // If already on main screen, do nothing (don't quit)
                         }
                         KeyCode::Char('c') if modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
                             // Handle Ctrl+C - only quit app when NOT in floating window
@@ -961,25 +983,62 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                             let selected_value = state.popup.options[state.popup.selected_index].clone();
                                             
                                             // Special handling for different popup types
-                                            if matches!(state.popup.popup_type, PopupType::ManualPartitioning) {
-                                                // Launch the selected partitioning tool
-                                                let tool = &selected_value;
-                                                state.config_values[current_step] = format!("manual_{}", tool);
+                                            if matches!(state.popup.popup_type, PopupType::PartitioningStrategy) {
+                                                // Clear any existing RAID level from previous selection
+                                                // and store the clean partitioning strategy
+                                                state.config_values[current_step] = selected_value.clone();
                                                 
-                                                // Note: In a real implementation, you would spawn the CLI tool here
-                                                // For now, we'll just set the value and continue
+                                                // Auto-set encryption based on partitioning strategy
+                                                if selected_value.contains("luks") {
+                                                    state.config_values[6] = "yes".to_string();
+                                                } else if selected_value != "manual" {
+                                                    state.config_values[6] = "no".to_string();
+                                                }
+                                                // For manual, leave encryption choice to user
+                                                
+                                                // If RAID strategy selected, show RAID level selection
+                                                if selected_value.starts_with("auto_raid") {
+                                                    state.popup.popup_type = PopupType::RAIDLevel;
+                                                    state.popup.selected_index = 0;
+                                                    // Keep popup open for RAID level selection
+                                                    continue;
+                                                } else {
+                                                    // Close popup for other strategies
+                                                    state.popup.is_active = false;
+                                                    state.popup.popup_type = PopupType::None;
+                                                    
+                                                    // Show appropriate message for manual partitioning
+                                                    if selected_value == "manual" {
+                                                        state.status_message = "Manual partitioning selected. The installer will pause for you to partition the disk manually when installation begins.".to_string();
+                                                    } else {
+                                                        let encryption_status = if selected_value.contains("luks") { " (encryption auto-enabled)" } else { " (encryption auto-disabled)" };
+                                                        state.status_message = format!("Partitioning strategy set to: {}{}", selected_value, encryption_status);
+                                                    }
+                                                }
+                                            } else if matches!(state.popup.popup_type, PopupType::RAIDLevel) {
+                                                // Combine partitioning strategy with RAID level
+                                                let strategy = state.config_values[5].clone();
+                                                state.config_values[5] = format!("{}_{}", strategy, selected_value);
+                                                state.popup.is_active = false;
+                                                state.popup.popup_type = PopupType::None;
+                                                state.status_message = format!("RAID {} selected for partitioning.", selected_value);
                                             } else if matches!(state.popup.popup_type, PopupType::DesktopEnvironment) {
                                                 // Store desktop environment and auto-select display manager
                                                 state.config_values[current_step] = selected_value.clone();
                                                 
-                                                // Auto-select display manager based on DE
-                                                let display_manager = match selected_value.as_str() {
-                                                    "gnome" => "gdm",
-                                                    "kde" => "sddm", 
-                                                    "hyprland" => "sddm",
-                                                    _ => "sddm", // Default fallback
-                                                };
-                                                state.config_values[7] = display_manager.to_string();
+                                                // Auto-select display manager based on DE (only if not "none")
+                                                if selected_value != "none" {
+                                                    let display_manager = match selected_value.as_str() {
+                                                        "gnome" => "gdm",
+                                                        "kde" => "sddm", 
+                                                        "hyprland" => "sddm",
+                                                        _ => "sddm", // Default fallback
+                                                    };
+                                                    state.config_values[34] = display_manager.to_string();
+                                                } else {
+                                                    // If "none" is selected, clear display manager to allow manual selection
+                                                    state.config_values[34] = String::new();
+                                                }
                                             } else if matches!(state.popup.popup_type, PopupType::TimezoneRegion) {
                                                 // Store timezone region and move to timezone city selection
                                                 state.config_values[current_step] = selected_value;
@@ -1001,8 +1060,8 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                                 state.config_values[field_index] = state.current_input.clone();
                                                 state.editing_field = None;
                                                 state.current_input.clear();
-                                            }
-                                        } else if state.config_step == 22 {
+                                                }
+                                        } else if state.config_step == 39 {
                                             // Start button pressed - begin installation
                                             state.is_configuring = false;
                                             state.is_running = true;
@@ -1023,59 +1082,85 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                             } else {
                                                 // Open selection popup
                                                 let popup_type = match state.config_step {
+                                                    0 => PopupType::BootOverride,
+                                                    1 => PopupType::SecureBoot,
+                                                    2 => PopupType::Locale,
+                                                    3 => PopupType::Keymap,
                                                     4 => PopupType::DiskSelection,
                                                     5 => {
-                                                        if state.config_values[4] == "manual" {
-                                                            PopupType::ManualPartitioning
-                                                        } else {
+                                                        // Always show partitioning strategy options to allow changes
                                                             PopupType::PartitioningStrategy
-                                                        }
                                                     },
-                                                    6 => PopupType::DesktopEnvironment,
-                                                    7 => PopupType::None, // Display Manager - auto-selected, no popup
-                                                    8 => {
-                                                        // Only show encryption if not auto_luks_lvm (which includes encryption)
-                                                        if state.config_values[5] == "auto_luks_lvm" {
-                                                            // Auto-set encryption to yes for auto_luks_lvm
-                                                            state.config_values[8] = "yes".to_string();
-                                                            // Move to next step automatically
-                                                            state.config_step += 1;
-                                                            PopupType::None
-                                                        } else {
+                                                    6 => {
+                                                        // Show encryption popup only for manual partitioning
+                                                        // Other strategies have encryption auto-set based on strategy
+                                                        if state.config_values[5] == "manual" {
                                                             PopupType::Encryption
+                                                        } else {
+                                                            // For auto strategies, encryption is auto-set, no popup needed
+                                                            PopupType::None
                                                         }
                                                     },
-                                                    9 => PopupType::Multilib,
-                                                    10 => PopupType::AURHelper,
-                                                    11 => PopupType::TimezoneRegion,
-                                                    12 => {
+                                                    7 => PopupType::RootFilesystem,
+                                                    8 => PopupType::HomePartition,
+                                                    9 => PopupType::HomeFilesystem,
+                                                    10 => PopupType::Swap,
+                                                    11 => PopupType::BtrfsSnapshots,
+                                                    12 => PopupType::BtrfsFrequency,
+                                                    13 => PopupType::BtrfsKeep,
+                                                    14 => PopupType::BtrfsAssistant,
+                                                    15 => PopupType::TimezoneRegion,
+                                                    16 => {
                                                         // Only show timezone cities if region is selected
-                                                        if !state.config_values[11].is_empty() {
+                                                        if !state.config_values[15].is_empty() {
                                                             PopupType::Timezone
                                                         } else {
                                                             PopupType::None
                                                         }
                                                     },
-                                                    13 => PopupType::Locale,
-                                                    14 => PopupType::Keymap,
-                                                    15 => PopupType::Bootloader,
-                                                    16 => PopupType::GRUBTheme,
-                                                    17 => PopupType::GPUDrivers,
-                                                    18 => PopupType::Plymouth,
-                                                    19 => PopupType::PlymouthTheme,
-                                                    20 => PopupType::PackageSelection, // Pacman packages
-                                                    21 => PopupType::PackageSelection, // AUR packages
+                                                    17 => PopupType::TimeSync,
+                                                    18 => PopupType::Mirror,
+                                                    19 => PopupType::Kernel,
+                                                    20 => PopupType::Multilib,
+                                                    21 => PopupType::PackageSelection, // Pacman packages
+                                                    22 => PopupType::GPUDrivers,
+                                                    23 => PopupType::None, // Hostname - handled as text input
+                                                    24 => PopupType::None, // Username - handled as text input
+                                                    25 => PopupType::None, // User Password - handled as text input
+                                                    26 => PopupType::None, // Root Password - handled as text input
+                                                    27 => PopupType::AURHelper,
+                                                    28 => PopupType::PackageSelection, // AUR packages
+                                                    29 => PopupType::Flatpak,
+                                                    30 => PopupType::Bootloader,
+                                                    31 => PopupType::OSProber,
+                                                    32 => PopupType::GRUBTheme,
+                                                    33 => PopupType::DesktopEnvironment,
+                                                    34 => {
+                                                        // Display Manager - only allow popup if desktop environment is "none"
+                                                        // When a specific DE is selected (gnome, kde, hyprland), it's a "full package" setup
+                                                        let desktop_env = &state.config_values[33];
+                                                        if desktop_env == "none" || desktop_env.is_empty() {
+                                                            PopupType::DisplayManager  // Allow manual selection
+                                                        } else {
+                                                            PopupType::None  // No popup for full package DEs
+                                                        }
+                                                    },
+                                                    35 => PopupType::Plymouth,
+                                                    36 => PopupType::PlymouthTheme,
+                                                    37 => PopupType::Numlock,
+                                                    38 => PopupType::GitRepository,
                                                     _ => PopupType::None,
                                                 };
                                                 
                                                 if !matches!(popup_type, PopupType::None) {
+                                                    
                                                     let (options, title) = if matches!(popup_type, PopupType::Timezone) {
                                                         // Special handling for timezone - get timezones for selected region
-                                                        let region = state.config_values[11].clone();
+                                                        let region = state.config_values[15].clone();
                                                         (detect_timezones_for_region(&region), "Select Timezone".to_string())
                                                     } else if matches!(popup_type, PopupType::PackageSelection) {
                                                         // Create floating window for package selection
-                                                        let is_pacman = state.config_step == 20; // Pacman packages
+                                                        let is_pacman = state.config_step == 21; // Pacman packages
                                                         let package_selection = PackageSelection::new(is_pacman);
                                                         state.focus = Focus::FloatingWindow(Float::new(Box::new(package_selection), 80, 60));
                                                         (vec![], "Interactive Package Selection".to_string())
@@ -1169,7 +1254,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                         state.config_step -= 1;
                                     } else if state.config_step == 0 {
                                         // Wrap around to start button
-                                        state.config_step = 22;
+                                        state.config_step = 39;
                                     }
                                 }
                             }
@@ -1196,9 +1281,9 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                 } else {
                                     // Navigate configuration options
-                                    if state.config_step < 22 {
+                                    if state.config_step < 39 {
                                         state.config_step += 1;
-                                    } else if state.config_step == 22 {
+                                    } else if state.config_step == 39 {
                                         // Wrap around to first option
                                         state.config_step = 0;
                                     }
@@ -1234,8 +1319,8 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
 
 fn is_text_input_field(step: usize) -> bool {
     match step {
-        0 | 1 | 2 | 3 => true,  // Username, passwords, hostname
-        _ => false,  // Selection-based fields (including disk and packages)
+        23 | 24 | 25 | 26 => true,  // Hostname, Username, User Password, Root Password
+        _ => false,  // Selection-based fields (including boot mode, disk, packages, etc.)
     }
 }
 
@@ -1306,6 +1391,7 @@ fn call_bash_function(script_path: &str, function_name: &str, args: &[&str]) -> 
         Err(e) => Err(format!("Failed to execute bash command: {}", e))
     }
 }
+
 
 fn detect_disks() -> Vec<String> {
     // Try to use the Bash function first (more robust filtering)
@@ -1462,9 +1548,12 @@ fn get_popup_options(popup_type: &PopupType) -> (Vec<String>, String) {
         PopupType::PartitioningStrategy => (
             vec![
                 "auto_simple".to_string(),
+                "auto_simple_luks".to_string(),
+                "auto_lvm".to_string(),
                 "auto_luks_lvm".to_string(),
+                "auto_raid_simple".to_string(),
+                "auto_raid_lvm".to_string(),
                 "manual".to_string(),
-                "raid".to_string(),
             ],
             "Select Partitioning Strategy".to_string()
         ),
@@ -1476,6 +1565,14 @@ fn get_popup_options(popup_type: &PopupType) -> (Vec<String>, String) {
                 "hyprland".to_string(),
             ],
             "Select Desktop Environment".to_string()
+        ),
+        PopupType::DisplayManager => (
+            vec![
+                "none".to_string(),
+                "gdm".to_string(),
+                "sddm".to_string(),
+            ],
+            "Select Display Manager".to_string()
         ),
         PopupType::AURHelper => (
             vec![
@@ -1581,15 +1678,14 @@ fn get_popup_options(popup_type: &PopupType) -> (Vec<String>, String) {
             ],
             "Select Plymouth Theme".to_string()
         ),
-        PopupType::ManualPartitioning => (
+        PopupType::RAIDLevel => (
             vec![
-                "fdisk".to_string(),
-                "gdisk".to_string(),
-                "cfdisk".to_string(),
-                "cgdisk".to_string(),
-                "parted".to_string(),
+                "raid0".to_string(),
+                "raid1".to_string(),
+                "raid5".to_string(),
+                "raid10".to_string(),
             ],
-            "Select Partitioning Tool".to_string()
+            "Select RAID Level".to_string()
         ),
         PopupType::PackageSelection => (
             vec![],
@@ -1599,113 +1695,161 @@ fn get_popup_options(popup_type: &PopupType) -> (Vec<String>, String) {
             vec![],
             format!("Enter {}", field_name)
         ),
+        // New popup types for missing configuration options
+        PopupType::WiFi => (
+            vec![
+                "yes".to_string(),
+                "no".to_string(),
+            ],
+            "Configure Wi-Fi Connection?".to_string()
+        ),
+        PopupType::WiFiSession => (
+            vec![],
+            "Launch iwctl Wi-Fi Configuration".to_string()
+        ),
+        PopupType::BootOverride => (
+            vec![
+                "auto".to_string(),
+                "uefi".to_string(),
+                "bios".to_string(),
+            ],
+            "Select Boot Mode Override".to_string()
+        ),
+        PopupType::SecureBoot => (
+            vec![
+                "yes".to_string(),
+                "no".to_string(),
+            ],
+            "Enable Secure Boot".to_string()
+        ),
+        PopupType::RootFilesystem => (
+            vec![
+                "ext4".to_string(),
+                "btrfs".to_string(),
+                "xfs".to_string(),
+            ],
+            "Select Root Filesystem Type".to_string()
+        ),
+        PopupType::HomePartition => (
+            vec![
+                "yes".to_string(),
+                "no".to_string(),
+            ],
+            "Create Separate Home Partition?".to_string()
+        ),
+        PopupType::HomeFilesystem => (
+            vec![
+                "ext4".to_string(),
+                "btrfs".to_string(),
+                "xfs".to_string(),
+            ],
+            "Select Home Filesystem Type".to_string()
+        ),
+        PopupType::Swap => (
+            vec![
+                "yes".to_string(),
+                "no".to_string(),
+            ],
+            "Create Swap Partition?".to_string()
+        ),
+        PopupType::BtrfsSnapshots => (
+            vec![
+                "yes".to_string(),
+                "no".to_string(),
+            ],
+            "Enable Btrfs Snapshots?".to_string()
+        ),
+        PopupType::BtrfsFrequency => (
+            vec![
+                "hourly".to_string(),
+                "daily".to_string(),
+                "weekly".to_string(),
+                "monthly".to_string(),
+            ],
+            "Select Snapshot Frequency".to_string()
+        ),
+        PopupType::BtrfsKeep => (
+            vec![
+                "5".to_string(),
+                "10".to_string(),
+                "15".to_string(),
+                "20".to_string(),
+                "30".to_string(),
+            ],
+            "Number of Snapshots to Keep".to_string()
+        ),
+        PopupType::BtrfsAssistant => (
+            vec![
+                "yes".to_string(),
+                "no".to_string(),
+            ],
+            "Install Btrfs Assistant?".to_string()
+        ),
+        PopupType::TimeSync => (
+            vec![
+                "ntpd".to_string(),
+                "systemd-timesyncd".to_string(),
+                "chrony".to_string(),
+            ],
+            "Select Time Synchronization Service".to_string()
+        ),
+        PopupType::Mirror => (
+            vec![
+                "US".to_string(),
+                "CA".to_string(),
+                "GB".to_string(),
+                "DE".to_string(),
+                "FR".to_string(),
+                "AU".to_string(),
+                "JP".to_string(),
+            ],
+            "Select Mirror Country".to_string()
+        ),
+        PopupType::Kernel => (
+            vec![
+                "linux".to_string(),
+                "linux-lts".to_string(),
+                "linux-zen".to_string(),
+                "linux-hardened".to_string(),
+            ],
+            "Select Kernel Type".to_string()
+        ),
+        PopupType::Flatpak => (
+            vec![
+                "yes".to_string(),
+                "no".to_string(),
+            ],
+            "Install Flatpak Support?".to_string()
+        ),
+        PopupType::OSProber => (
+            vec![
+                "yes".to_string(),
+                "no".to_string(),
+            ],
+            "Enable OS Prober (Multi-boot detection)".to_string()
+        ),
+        PopupType::Numlock => (
+            vec![
+                "yes".to_string(),
+                "no".to_string(),
+            ],
+            "Enable Numlock on Boot?".to_string()
+        ),
+        PopupType::GitRepository => (
+            vec![
+                "yes".to_string(),
+                "no".to_string(),
+            ],
+            "Clone Git Repository?".to_string()
+        ),
         PopupType::None => (vec![], String::new()),
     }
 }
 
-fn change_config_value(state: &mut InstallerState) {
-    match state.config_step {
-        5 => { // Partitioning strategy
-            state.config_values[5] = match state.config_values[5].as_str() {
-                "auto_simple" => "auto_luks_lvm".to_string(),
-                "auto_luks_lvm" => "auto_simple".to_string(),
-                _ => "auto_simple".to_string(),
-            };
-        }
-        6 => { // Desktop environment
-            state.config_values[6] = match state.config_values[6].as_str() {
-                "gnome" => "kde".to_string(),
-                "kde" => "xfce".to_string(),
-                "xfce" => "lxqt".to_string(),
-                "lxqt" => "none".to_string(),
-                "none" => "gnome".to_string(),
-                _ => "gnome".to_string(),
-            };
-        }
-        7 => { // Encryption
-            state.config_values[7] = match state.config_values[7].as_str() {
-                "yes" => "no".to_string(),
-                "no" => "yes".to_string(),
-                _ => "yes".to_string(),
-            };
-        }
-        8 => { // Multilib
-            state.config_values[8] = match state.config_values[8].as_str() {
-                "yes" => "no".to_string(),
-                "no" => "yes".to_string(),
-                _ => "yes".to_string(),
-            };
-        }
-        9 => { // AUR helper
-            state.config_values[9] = match state.config_values[9].as_str() {
-                "paru" => "yay".to_string(),
-                "yay" => "aura".to_string(),
-                "aura" => "none".to_string(),
-                "none" => "paru".to_string(),
-                _ => "paru".to_string(),
-            };
-        }
-        10 => { // Timezone
-            state.config_values[10] = match state.config_values[10].as_str() {
-                "America/New_York" => "America/Chicago".to_string(),
-                "America/Chicago" => "America/Denver".to_string(),
-                "America/Denver" => "America/Los_Angeles".to_string(),
-                "America/Los_Angeles" => "Europe/London".to_string(),
-                "Europe/London" => "Europe/Paris".to_string(),
-                "Europe/Paris" => "Asia/Tokyo".to_string(),
-                "Asia/Tokyo" => "America/New_York".to_string(),
-                _ => "America/New_York".to_string(),
-            };
-        }
-        11 => { // Locale
-            state.config_values[11] = match state.config_values[11].as_str() {
-                "en_US.UTF-8" => "en_GB.UTF-8".to_string(),
-                "en_GB.UTF-8" => "de_DE.UTF-8".to_string(),
-                "de_DE.UTF-8" => "fr_FR.UTF-8".to_string(),
-                "fr_FR.UTF-8" => "es_ES.UTF-8".to_string(),
-                "es_ES.UTF-8" => "en_US.UTF-8".to_string(),
-                _ => "en_US.UTF-8".to_string(),
-            };
-        }
-        12 => { // Keymap
-            state.config_values[12] = match state.config_values[12].as_str() {
-                "us" => "uk".to_string(),
-                "uk" => "de".to_string(),
-                "de" => "fr".to_string(),
-                "fr" => "es".to_string(),
-                "es" => "us".to_string(),
-                _ => "us".to_string(),
-            };
-        }
-        13 => { // Bootloader
-            state.config_values[13] = match state.config_values[13].as_str() {
-                "grub" => "systemd-boot".to_string(),
-                "systemd-boot" => "refind".to_string(),
-                "refind" => "grub".to_string(),
-                _ => "grub".to_string(),
-            };
-        }
-        14 => { // GRUB theme
-            state.config_values[14] = match state.config_values[14].as_str() {
-                "arch-glow" => "arch-silence".to_string(),
-                "arch-silence" => "arch-matrix".to_string(),
-                "arch-matrix" => "none".to_string(),
-                "none" => "arch-glow".to_string(),
-                _ => "arch-glow".to_string(),
-            };
-        }
-        15 => { // GPU drivers
-            state.config_values[15] = match state.config_values[15].as_str() {
-                "auto" => "nvidia".to_string(),
-                "nvidia" => "amd".to_string(),
-                "amd" => "intel".to_string(),
-                "intel" => "none".to_string(),
-                "none" => "auto".to_string(),
-                _ => "auto".to_string(),
-            };
-        }
-        _ => {}
-    }
+fn change_config_value(_state: &mut InstallerState) {
+    // This function is not currently used in the TUI
+    // All configuration changes are handled through popups
+    // Keeping this function for potential future use
 }
 
 fn start_installer_with_config(app_state: Arc<Mutex<InstallerState>>, config_values: Vec<String>) {
@@ -1715,11 +1859,69 @@ fn start_installer_with_config(app_state: Arc<Mutex<InstallerState>>, config_val
     });
 }
 
-fn run_actual_installer(app_state: Arc<Mutex<InstallerState>>, _config_values: Vec<String>) {
+fn run_actual_installer(app_state: Arc<Mutex<InstallerState>>, config_values: Vec<String>) {
+    // Set environment variables for the bash installer
+    let mut env_vars = std::collections::HashMap::new();
+    env_vars.insert("TUI_MODE".to_string(), "true".to_string());
+    
+    // Map TUI configuration values to environment variables expected by bash installer
+    env_vars.insert("BOOT_MODE_OVERRIDE".to_string(), config_values.get(0).unwrap_or(&String::new()).clone());
+    env_vars.insert("WANT_SECURE_BOOT".to_string(), config_values.get(1).unwrap_or(&String::new()).clone());
+    env_vars.insert("LOCALE".to_string(), config_values.get(2).unwrap_or(&String::new()).clone());
+    env_vars.insert("KEYMAP".to_string(), config_values.get(3).unwrap_or(&String::new()).clone());
+    env_vars.insert("INSTALL_DISK".to_string(), config_values.get(4).unwrap_or(&String::new()).clone());
+    env_vars.insert("PARTITION_SCHEME".to_string(), config_values.get(5).unwrap_or(&String::new()).clone());
+    env_vars.insert("WANT_ENCRYPTION".to_string(), config_values.get(6).unwrap_or(&String::new()).clone());
+    env_vars.insert("ROOT_FILESYSTEM_TYPE".to_string(), config_values.get(7).unwrap_or(&String::new()).clone());
+    env_vars.insert("WANT_HOME_PARTITION".to_string(), config_values.get(8).unwrap_or(&String::new()).clone());
+    env_vars.insert("HOME_FILESYSTEM_TYPE".to_string(), config_values.get(9).unwrap_or(&String::new()).clone());
+    env_vars.insert("WANT_SWAP".to_string(), config_values.get(10).unwrap_or(&String::new()).clone());
+    env_vars.insert("WANT_BTRFS_SNAPSHOTS".to_string(), config_values.get(11).unwrap_or(&String::new()).clone());
+    env_vars.insert("BTRFS_SNAPSHOT_FREQUENCY".to_string(), config_values.get(12).unwrap_or(&String::new()).clone());
+    env_vars.insert("BTRFS_KEEP_SNAPSHOTS".to_string(), config_values.get(13).unwrap_or(&String::new()).clone());
+    env_vars.insert("WANT_BTRFS_ASSISTANT".to_string(), config_values.get(14).unwrap_or(&String::new()).clone());
+    env_vars.insert("TIMEZONE_REGION".to_string(), config_values.get(15).unwrap_or(&String::new()).clone());
+    env_vars.insert("TIMEZONE".to_string(), config_values.get(16).unwrap_or(&String::new()).clone());
+    env_vars.insert("TIME_SYNC_CHOICE".to_string(), config_values.get(17).unwrap_or(&String::new()).clone());
+    env_vars.insert("REFLECTOR_COUNTRY_CODE".to_string(), config_values.get(18).unwrap_or(&String::new()).clone());
+    env_vars.insert("KERNEL_TYPE".to_string(), config_values.get(19).unwrap_or(&String::new()).clone());
+    env_vars.insert("WANT_MULTILIB".to_string(), config_values.get(20).unwrap_or(&String::new()).clone());
+    env_vars.insert("CUSTOM_PACKAGES".to_string(), config_values.get(21).unwrap_or(&String::new()).clone());
+    env_vars.insert("GPU_DRIVER_TYPE".to_string(), config_values.get(22).unwrap_or(&String::new()).clone());
+    env_vars.insert("SYSTEM_HOSTNAME".to_string(), config_values.get(23).unwrap_or(&String::new()).clone());
+    env_vars.insert("MAIN_USERNAME".to_string(), config_values.get(24).unwrap_or(&String::new()).clone());
+    env_vars.insert("MAIN_USER_PASSWORD".to_string(), config_values.get(25).unwrap_or(&String::new()).clone());
+    env_vars.insert("ROOT_PASSWORD".to_string(), config_values.get(26).unwrap_or(&String::new()).clone());
+    env_vars.insert("AUR_HELPER_CHOICE".to_string(), config_values.get(27).unwrap_or(&String::new()).clone());
+    env_vars.insert("CUSTOM_AUR_PACKAGES".to_string(), config_values.get(28).unwrap_or(&String::new()).clone());
+    env_vars.insert("WANT_FLATPAK".to_string(), config_values.get(29).unwrap_or(&String::new()).clone());
+    env_vars.insert("BOOTLOADER_TYPE".to_string(), config_values.get(30).unwrap_or(&String::new()).clone());
+    env_vars.insert("ENABLE_OS_PROBER".to_string(), config_values.get(31).unwrap_or(&String::new()).clone());
+    env_vars.insert("GRUB_THEME_CHOICE".to_string(), config_values.get(32).unwrap_or(&String::new()).clone());
+    env_vars.insert("DESKTOP_ENVIRONMENT".to_string(), config_values.get(33).unwrap_or(&String::new()).clone());
+    env_vars.insert("DISPLAY_MANAGER".to_string(), config_values.get(34).unwrap_or(&String::new()).clone());
+    env_vars.insert("WANT_PLYMOUTH".to_string(), config_values.get(35).unwrap_or(&String::new()).clone());
+    env_vars.insert("PLYMOUTH_THEME_CHOICE".to_string(), config_values.get(36).unwrap_or(&String::new()).clone());
+    env_vars.insert("WANT_NUMLOCK_ON_BOOT".to_string(), config_values.get(37).unwrap_or(&String::new()).clone());
+    env_vars.insert("DOTFILES_REPO_URL".to_string(), config_values.get(38).unwrap_or(&String::new()).clone());
+    
+    // Set additional environment variables that bash scripts expect
+    env_vars.insert("WANT_AUR_HELPER".to_string(), if config_values.get(27).unwrap_or(&String::new()) != "none" { "yes".to_string() } else { "no".to_string() });
+    env_vars.insert("WANT_GRUB_THEME".to_string(), if config_values.get(32).unwrap_or(&String::new()) != "none" { "yes".to_string() } else { "no".to_string() });
+    env_vars.insert("WANT_PLYMOUTH_THEME".to_string(), if config_values.get(36).unwrap_or(&String::new()) != "none" { "yes".to_string() } else { "no".to_string() });
+    env_vars.insert("WANT_BTRFS".to_string(), if config_values.get(7).unwrap_or(&String::new()) == "btrfs" || config_values.get(9).unwrap_or(&String::new()) == "btrfs" { "yes".to_string() } else { "no".to_string() });
+    env_vars.insert("WANT_LVM".to_string(), if config_values.get(5).unwrap_or(&String::new()).contains("lvm") { "yes".to_string() } else { "no".to_string() });
+    env_vars.insert("WANT_RAID".to_string(), if config_values.get(5).unwrap_or(&String::new()).contains("raid") { "yes".to_string() } else { "no".to_string() });
+    env_vars.insert("INSTALL_CUSTOM_PACKAGES".to_string(), if config_values.get(21).unwrap_or(&String::new()).is_empty() { "no".to_string() } else { "yes".to_string() });
+    env_vars.insert("INSTALL_CUSTOM_AUR_PACKAGES".to_string(), if config_values.get(28).unwrap_or(&String::new()).is_empty() { "no".to_string() } else { "yes".to_string() });
+    env_vars.insert("WANT_DOTFILES_DEPLOYMENT".to_string(), if config_values.get(38).unwrap_or(&String::new()).is_empty() { "no".to_string() } else { "yes".to_string() });
+    env_vars.insert("OVERRIDE_BOOT_MODE".to_string(), if config_values.get(0).unwrap_or(&String::new()) == "auto" { "no".to_string() } else { "yes".to_string() });
+    
     // Run the installer and capture both stdout and stderr
     let mut child = Command::new("bash")
         .arg("./launch_tui_installer.sh")
         .arg("--bash-only")
+        .envs(&env_vars)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -1911,7 +2113,7 @@ fn ui(f: &mut Frame, app_state: &mut InstallerState) {
             f.render_widget(title, chunks[1]);
             
             // Render instructions and start button
-            let instructions = "Use ↑↓ to navigate, Enter to open popup, 'q' to quit";
+            let instructions = "Use ↑↓ to navigate, Enter to open popup, 'q' to quit installer";
             let instruction_text = Paragraph::new(instructions)
                 .block(Block::default().borders(Borders::NONE))
                 .alignment(Alignment::Center)
@@ -1964,80 +2166,160 @@ fn render_configuration_ui(f: &mut Frame, app_state: &mut InstallerState) {
         .style(Style::default().fg(Color::Cyan));
     f.render_widget(title, chunks[1]);
 
-    // Configuration options
+    // Configuration options - Correct order with hostname between GPU drivers and username
     let config_items = vec![
-        ListItem::new(format!("Username: {}", 
-            if app_state.editing_field == Some(0) { 
-                format!("{}_", app_state.current_input) 
-            } else if app_state.config_values[0].is_empty() { 
-                "[Press Enter]".to_string() 
-            } else { 
-                app_state.config_values[0].clone() 
-            }))
+        // Boot Setup (0-1)
+        ListItem::new(format!("Boot Mode: {}", if app_state.config_values[0].is_empty() { "[Press Enter]" } else { &app_state.config_values[0] }))
             .style(if app_state.config_step == 0 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("User Password: {}", 
-            if app_state.editing_field == Some(1) { 
-                format!("{}_", "*".repeat(app_state.current_input.len())) 
-            } else if app_state.config_values[1].is_empty() { 
-                "[Press Enter]".to_string() 
-            } else { 
-                "***".to_string() 
-            }))
+        ListItem::new(format!("Secure Boot: {}", if app_state.config_values[1].is_empty() { "[Press Enter]" } else { &app_state.config_values[1] }))
             .style(if app_state.config_step == 1 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Root Password: {}", 
-            if app_state.editing_field == Some(2) { 
-                format!("{}_", "*".repeat(app_state.current_input.len())) 
-            } else if app_state.config_values[2].is_empty() { 
-                "[Press Enter]".to_string() 
-            } else { 
-                "***".to_string() 
-            }))
+        
+        // System Locale and Input (2-3)
+        ListItem::new(format!("Locale: {}", if app_state.config_values[2].is_empty() { "[Press Enter]" } else { &app_state.config_values[2] }))
             .style(if app_state.config_step == 2 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Hostname: {}", 
-            if app_state.editing_field == Some(3) { 
-                format!("{}_", app_state.current_input) 
-            } else if app_state.config_values[3].is_empty() { 
-                "[Press Enter]".to_string() 
-            } else { 
-                app_state.config_values[3].clone() 
-            }))
+        ListItem::new(format!("Keymap: {}", if app_state.config_values[3].is_empty() { "[Press Enter]" } else { &app_state.config_values[3] }))
             .style(if app_state.config_step == 3 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        
+        // Disk and Storage (4-14)
         ListItem::new(format!("Disk: {}", if app_state.config_values[4].is_empty() { "[Press Enter]" } else { &app_state.config_values[4] }))
             .style(if app_state.config_step == 4 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Partitioning Strategy: {}", if app_state.config_values[5].is_empty() { "[Press Enter]" } else { &app_state.config_values[5] }))
+        {
+            let strategy_text = if app_state.config_values[5].is_empty() {
+                "[Press Enter]".to_string()
+            } else {
+                format!("{} [Press Enter to change]", app_state.config_values[5])
+            };
+            ListItem::new(format!("Partitioning Strategy: {}", strategy_text))
+        }
             .style(if app_state.config_step == 5 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Desktop Environment: {}", if app_state.config_values[6].is_empty() { "[Press Enter]" } else { &app_state.config_values[6] }))
+        {
+            let encryption_text = if app_state.config_values[6].is_empty() {
+                "[Press Enter]".to_string()
+            } else {
+                let value = &app_state.config_values[6];
+                let strategy = &app_state.config_values[5];
+                if (strategy.contains("luks") && value == "yes") || (!strategy.contains("luks") && value == "no") {
+                    format!("{} (auto-set)", value)
+                } else {
+                    format!("{} [Press Enter to change]", value)
+                }
+            };
+            ListItem::new(format!("Encryption: {}", encryption_text))
+        }
             .style(if app_state.config_step == 6 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Display Manager: {}", if app_state.config_values[7].is_empty() { "[Auto-selected]" } else { &app_state.config_values[7] }))
+        ListItem::new(format!("Root Filesystem: {}", if app_state.config_values[7].is_empty() { "[Press Enter]" } else { &app_state.config_values[7] }))
             .style(if app_state.config_step == 7 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Encryption: {}", if app_state.config_values[8].is_empty() { "[Press Enter]" } else { &app_state.config_values[8] }))
+        ListItem::new(format!("Separate Home Partition: {}", if app_state.config_values[8].is_empty() { "[Press Enter]" } else { &app_state.config_values[8] }))
             .style(if app_state.config_step == 8 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Multilib (32-bit): {}", if app_state.config_values[9].is_empty() { "[Press Enter]" } else { &app_state.config_values[9] }))
+        ListItem::new(format!("Home Filesystem: {}", if app_state.config_values[9].is_empty() { "[Press Enter]" } else { &app_state.config_values[9] }))
             .style(if app_state.config_step == 9 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("AUR Helper: {}", if app_state.config_values[10].is_empty() { "[Press Enter]" } else { &app_state.config_values[10] }))
+        ListItem::new(format!("Swap: {}", if app_state.config_values[10].is_empty() { "[Press Enter]" } else { &app_state.config_values[10] }))
             .style(if app_state.config_step == 10 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Timezone Region: {}", if app_state.config_values[11].is_empty() { "[Press Enter]" } else { &app_state.config_values[11] }))
+        ListItem::new(format!("Btrfs Snapshots: {}", if app_state.config_values[11].is_empty() { "[Press Enter]" } else { &app_state.config_values[11] }))
             .style(if app_state.config_step == 11 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Timezone: {}", if app_state.config_values[12].is_empty() { "[Press Enter]" } else { &app_state.config_values[12] }))
+        ListItem::new(format!("Btrfs Frequency: {}", if app_state.config_values[12].is_empty() { "[Press Enter]" } else { &app_state.config_values[12] }))
             .style(if app_state.config_step == 12 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Locale: {}", if app_state.config_values[13].is_empty() { "[Press Enter]" } else { &app_state.config_values[13] }))
+        ListItem::new(format!("Btrfs Keep Count: {}", if app_state.config_values[13].is_empty() { "[Press Enter]" } else { &app_state.config_values[13] }))
             .style(if app_state.config_step == 13 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Keymap: {}", if app_state.config_values[14].is_empty() { "[Press Enter]" } else { &app_state.config_values[14] }))
+        ListItem::new(format!("Btrfs Assistant: {}", if app_state.config_values[14].is_empty() { "[Press Enter]" } else { &app_state.config_values[14] }))
             .style(if app_state.config_step == 14 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Bootloader: {}", if app_state.config_values[15].is_empty() { "[Press Enter]" } else { &app_state.config_values[15] }))
+        
+        // Time and Location (15-17)
+        ListItem::new(format!("Timezone Region: {}", if app_state.config_values[15].is_empty() { "[Press Enter]" } else { &app_state.config_values[15] }))
             .style(if app_state.config_step == 15 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("GRUB Theme: {}", if app_state.config_values[16].is_empty() { "[Press Enter]" } else { &app_state.config_values[16] }))
+        ListItem::new(format!("Timezone: {}", if app_state.config_values[16].is_empty() { "[Press Enter]" } else { &app_state.config_values[16] }))
             .style(if app_state.config_step == 16 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("GPU Drivers: {}", if app_state.config_values[17].is_empty() { "[Press Enter]" } else { &app_state.config_values[17] }))
+        ListItem::new(format!("Time Sync (NTP): {}", if app_state.config_values[17].is_empty() { "[Press Enter]" } else { &app_state.config_values[17] }))
             .style(if app_state.config_step == 17 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Plymouth: {}", if app_state.config_values[18].is_empty() { "[Press Enter]" } else { &app_state.config_values[18] }))
+        
+        // System Packages (19-23)
+        ListItem::new(format!("Mirror Country: {}", if app_state.config_values[18].is_empty() { "[Press Enter]" } else { &app_state.config_values[18] }))
             .style(if app_state.config_step == 18 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Plymouth Theme: {}", if app_state.config_values[19].is_empty() { "[Press Enter]" } else { &app_state.config_values[19] }))
+        ListItem::new(format!("Kernel: {}", if app_state.config_values[19].is_empty() { "[Press Enter]" } else { &app_state.config_values[19] }))
             .style(if app_state.config_step == 19 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("Pacman Packages: {}", get_selected_packages("pacman")))
+        ListItem::new(format!("Multilib: {}", if app_state.config_values[20].is_empty() { "[Press Enter]" } else { &app_state.config_values[20] }))
             .style(if app_state.config_step == 20 { Style::default().fg(Color::Yellow) } else { Style::default() }),
-        ListItem::new(format!("AUR Packages: {}", get_selected_packages("aur")))
+        ListItem::new(format!("Additional Pacman Packages: {}", get_selected_packages("pacman")))
             .style(if app_state.config_step == 21 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("GPU Drivers: {}", if app_state.config_values[22].is_empty() { "[Press Enter]" } else { &app_state.config_values[22] }))
+            .style(if app_state.config_step == 22 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        
+        // Hostname (23) - moved between GPU drivers and username
+        ListItem::new(format!("Hostname: {}", if app_state.editing_field == Some(23) { 
+                format!("{}_", app_state.current_input) 
+        } else if app_state.config_values[23].is_empty() { 
+                "[Press Enter]".to_string() 
+            } else { 
+            app_state.config_values[23].clone() 
+        }))
+            .style(if app_state.config_step == 23 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        
+        // User Setup (24-26)
+        ListItem::new(format!("Username: {}", if app_state.editing_field == Some(24) { 
+            format!("{}_", app_state.current_input) 
+        } else if app_state.config_values[24].is_empty() { 
+            "[Press Enter]".to_string() 
+        } else { 
+            app_state.config_values[24].clone() 
+        }))
+            .style(if app_state.config_step == 24 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("User Password: {}", if app_state.editing_field == Some(25) { 
+            format!("{}_", app_state.current_input) 
+        } else if app_state.config_values[25].is_empty() { 
+            "[Press Enter]".to_string() 
+        } else { 
+            "***".to_string() 
+        }))
+            .style(if app_state.config_step == 25 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("Root Password: {}", if app_state.editing_field == Some(26) { 
+            format!("{}_", app_state.current_input) 
+        } else if app_state.config_values[26].is_empty() { 
+            "[Press Enter]".to_string() 
+        } else { 
+            "***".to_string() 
+        }))
+            .style(if app_state.config_step == 26 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        
+        // Package Management (28-30)
+        ListItem::new(format!("AUR Helper: {}", if app_state.config_values[27].is_empty() { "[Press Enter]" } else { &app_state.config_values[27] }))
+            .style(if app_state.config_step == 27 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("Additional AUR Packages: {}", get_selected_packages("aur")))
+            .style(if app_state.config_step == 28 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("Flatpak: {}", if app_state.config_values[29].is_empty() { "[Press Enter]" } else { &app_state.config_values[29] }))
+            .style(if app_state.config_step == 29 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        
+        // Boot Configuration (31-33)
+        ListItem::new(format!("Bootloader: {}", if app_state.config_values[30].is_empty() { "[Press Enter]" } else { &app_state.config_values[30] }))
+            .style(if app_state.config_step == 30 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("OS Prober: {}", if app_state.config_values[31].is_empty() { "[Press Enter]" } else { &app_state.config_values[31] }))
+            .style(if app_state.config_step == 31 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("GRUB Theme: {}", if app_state.config_values[32].is_empty() { "[Press Enter]" } else { &app_state.config_values[32] }))
+            .style(if app_state.config_step == 32 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        
+        // Desktop Environment (34-35)
+        ListItem::new(format!("Desktop Environment: {}", if app_state.config_values[33].is_empty() { "[Press Enter]" } else { &app_state.config_values[33] }))
+            .style(if app_state.config_step == 33 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("Display Manager: {}", if app_state.config_values[34].is_empty() { 
+            let desktop_env = &app_state.config_values[33];
+            if desktop_env == "none" || desktop_env.is_empty() { 
+                "[Press Enter]".to_string() 
+            } else { 
+                "[Auto-selected]".to_string() 
+            }
+        } else { 
+            app_state.config_values[34].clone()
+        }))
+            .style(if app_state.config_step == 34 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        
+        // Boot Splash and Final Setup (36-39)
+        ListItem::new(format!("Plymouth: {}", if app_state.config_values[35].is_empty() { "[Press Enter]" } else { &app_state.config_values[35] }))
+            .style(if app_state.config_step == 35 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("Plymouth Theme: {}", if app_state.config_values[36].is_empty() { "[Press Enter]" } else { &app_state.config_values[36] }))
+            .style(if app_state.config_step == 36 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("Numlock on Boot: {}", if app_state.config_values[37].is_empty() { "[Press Enter]" } else { &app_state.config_values[37] }))
+            .style(if app_state.config_step == 37 { Style::default().fg(Color::Yellow) } else { Style::default() }),
+        ListItem::new(format!("Git Repository: {}", if app_state.config_values[38].is_empty() { "[Press Enter]" } else { &app_state.config_values[38] }))
+            .style(if app_state.config_step == 38 { Style::default().fg(Color::Yellow) } else { Style::default() }),
     ];
 
     let config_list = List::new(config_items)
@@ -2046,9 +2328,9 @@ fn render_configuration_ui(f: &mut Frame, app_state: &mut InstallerState) {
 
     // Instructions
     let instructions = if app_state.popup.is_active {
-        "Use ↑↓ to navigate, Enter to select, Esc to cancel"
+        "Use ↑↓ to navigate, Enter to select, Esc to return to main menu"
     } else {
-        "Use ↑↓ to navigate, Enter to open popup, 'q' to quit"
+        "Use ↑↓ to navigate, Enter to open popup, 'q' to quit installer"
     };
     let instruction_text = Paragraph::new(instructions)
         .block(Block::default().borders(Borders::NONE))
@@ -2057,7 +2339,7 @@ fn render_configuration_ui(f: &mut Frame, app_state: &mut InstallerState) {
     f.render_widget(instruction_text, chunks[3]);
 
     // Start button
-    let start_button_text = if app_state.config_step == 22 {
+    let start_button_text = if app_state.config_step == 39 {
         "> START INSTALLATION <"
     } else {
         "  START INSTALLATION  "
@@ -2065,7 +2347,7 @@ fn render_configuration_ui(f: &mut Frame, app_state: &mut InstallerState) {
     let start_button = Paragraph::new(start_button_text)
         .block(Block::default().borders(Borders::ALL))
         .alignment(Alignment::Center)
-        .style(if app_state.config_step == 22 { 
+        .style(if app_state.config_step == 39 { 
             Style::default().fg(Color::Black).bg(Color::Green) 
         } else { 
             Style::default().fg(Color::Green) 
@@ -2105,80 +2387,6 @@ fn render_installation_ui(f: &mut Frame, app_state: &mut InstallerState) {
     render_instructions(f, chunks[5], app_state);
 }
 
-fn render_minimal_ui(f: &mut Frame, app_state: &mut InstallerState) {
-    let size = f.area();
-    
-    // Simple layout for small terminals
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),  // Title
-            Constraint::Length(3),  // Progress
-            Constraint::Length(3),  // Status
-            Constraint::Min(0),     // Output
-            Constraint::Length(3),  // Instructions
-        ])
-        .split(size);
-
-    // Simple title
-    let title = Paragraph::new("Arch Linux Installer")
-        .block(Block::default().borders(Borders::ALL))
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(Color::Cyan));
-    f.render_widget(title, chunks[0]);
-
-    // Progress bar
-    let progress = Gauge::default()
-        .block(Block::default().title(format!("{} - {}%", app_state.current_phase, app_state.progress)))
-        .gauge_style(Style::default().fg(Color::Cyan))
-        .percent(app_state.progress.into());
-    f.render_widget(progress, chunks[1]);
-
-    // Status
-    let status = Paragraph::new(app_state.status_message.as_str())
-        .block(Block::default().title("Status").borders(Borders::ALL))
-        .style(Style::default().fg(Color::White))
-        .wrap(Wrap { trim: true });
-    f.render_widget(status, chunks[2]);
-
-    // Output (simplified)
-    let output_items: Vec<ListItem> = app_state.installer_output
-        .iter()
-        .rev()
-        .take(10) // Show only last 10 lines
-        .map(|line| ListItem::new(line.clone()))
-        .collect();
-    let output_list = List::new(output_items)
-        .block(Block::default().title("Output").borders(Borders::ALL));
-    f.render_widget(output_list, chunks[3]);
-
-    // Instructions
-    let instructions = if app_state.is_running && !app_state.is_complete {
-        "Installing... Press 'q' to quit"
-    } else if app_state.is_complete {
-        if app_state.current_phase == "Failed" {
-            "Failed! Press 'q' to quit"
-        } else {
-            "Complete! Press 'q' to quit"
-        }
-    } else {
-        "Press 's' to start, 'q' to quit"
-    };
-
-    let color = if app_state.current_phase == "Failed" {
-        Color::Red
-    } else if app_state.is_complete {
-        Color::Green
-    } else {
-        Color::Yellow
-    };
-
-    let instruction_text = Paragraph::new(instructions)
-        .block(Block::default().borders(Borders::NONE))
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(color));
-    f.render_widget(instruction_text, chunks[4]);
-}
 
 fn render_header(f: &mut Frame, area: Rect) {
     // Ensure we have a valid area
@@ -2259,28 +2467,65 @@ fn render_config(f: &mut Frame, area: Rect, app_state: &mut InstallerState) {
     }
     
     let config_items = vec![
-        ListItem::new(format!("Username: {}", app_state.config_values[0])),
-        ListItem::new(format!("User Password: {}", if app_state.config_values[1].is_empty() { "Not set" } else { "***" })),
-        ListItem::new(format!("Root Password: {}", if app_state.config_values[2].is_empty() { "Not set" } else { "***" })),
-        ListItem::new(format!("Hostname: {}", app_state.config_values[3])),
-        ListItem::new(format!("Disk: {}", app_state.config_values[4])),
-        ListItem::new(format!("Partitioning: {}", app_state.config_values[5])),
-        ListItem::new(format!("Desktop: {}", app_state.config_values[6])),
-        ListItem::new(format!("Display Manager: {}", app_state.config_values[7])),
-        ListItem::new(format!("Encryption: {}", app_state.config_values[8])),
-        ListItem::new(format!("Multilib: {}", app_state.config_values[9])),
-        ListItem::new(format!("AUR Helper: {}", app_state.config_values[10])),
-        ListItem::new(format!("Timezone Region: {}", app_state.config_values[11])),
-        ListItem::new(format!("Timezone: {}", app_state.config_values[12])),
-        ListItem::new(format!("Locale: {}", app_state.config_values[13])),
-        ListItem::new(format!("Keymap: {}", app_state.config_values[14])),
-        ListItem::new(format!("Bootloader: {}", app_state.config_values[15])),
-        ListItem::new(format!("GRUB Theme: {}", app_state.config_values[16])),
-        ListItem::new(format!("GPU Drivers: {}", app_state.config_values[17])),
-        ListItem::new(format!("Plymouth: {}", app_state.config_values[18])),
-        ListItem::new(format!("Plymouth Theme: {}", app_state.config_values[19])),
-        ListItem::new(format!("Pacman Packages: {}", if app_state.config_values[20].is_empty() { "[Press Enter]" } else { &app_state.config_values[20] })),
-        ListItem::new(format!("AUR Packages: {}", if app_state.config_values[21].is_empty() { "[Press Enter]" } else { &app_state.config_values[21] })),
+        // Network and Boot Setup
+        ListItem::new(format!("Wi-Fi Connection: {}", app_state.config_values[0])),
+        ListItem::new(format!("Boot Mode: {}", app_state.config_values[1])),
+        ListItem::new(format!("Secure Boot: {}", app_state.config_values[2])),
+        
+        // System Locale and Input
+        ListItem::new(format!("Locale: {}", app_state.config_values[3])),
+        ListItem::new(format!("Keymap: {}", app_state.config_values[4])),
+        
+        // Disk and Storage
+        ListItem::new(format!("Disk: {}", app_state.config_values[5])),
+        ListItem::new(format!("Partitioning: {}", app_state.config_values[6])),
+        ListItem::new(format!("Encryption: {}", app_state.config_values[7])),
+        ListItem::new(format!("Root Filesystem: {}", app_state.config_values[8])),
+        ListItem::new(format!("Separate Home Partition: {}", app_state.config_values[9])),
+        ListItem::new(format!("Home Filesystem: {}", app_state.config_values[10])),
+        ListItem::new(format!("Swap: {}", app_state.config_values[11])),
+        ListItem::new(format!("Btrfs Snapshots: {}", app_state.config_values[12])),
+        ListItem::new(format!("Btrfs Frequency: {}", app_state.config_values[13])),
+        ListItem::new(format!("Btrfs Keep Count: {}", app_state.config_values[14])),
+        ListItem::new(format!("Btrfs Assistant: {}", app_state.config_values[15])),
+        
+        // Time and Location
+        ListItem::new(format!("Timezone: {}", app_state.config_values[16])),
+        ListItem::new(format!("Region: {}", app_state.config_values[17])),
+        ListItem::new(format!("Time Sync (NTP): {}", app_state.config_values[18])),
+        
+        // System Packages
+        ListItem::new(format!("Mirror Country: {}", app_state.config_values[19])),
+        ListItem::new(format!("Kernel: {}", app_state.config_values[20])),
+        ListItem::new(format!("Multilib: {}", app_state.config_values[21])),
+        ListItem::new(format!("Additional Pacman Packages: {}", if app_state.config_values[22].is_empty() { "[Press Enter]" } else { &app_state.config_values[22] })),
+        ListItem::new(format!("GPU Drivers: {}", app_state.config_values[22])),
+        ListItem::new(format!("Hostname: {}", app_state.config_values[23])),
+        
+        // User Setup
+        ListItem::new(format!("Username: {}", app_state.config_values[24])),
+        ListItem::new(format!("User Password: {}", if app_state.config_values[25].is_empty() { "Not set" } else { "***" })),
+        ListItem::new(format!("Root Password: {}", if app_state.config_values[26].is_empty() { "Not set" } else { "***" })),
+        
+        // Package Management
+        ListItem::new(format!("AUR Helper: {}", app_state.config_values[27])),
+        ListItem::new(format!("Additional AUR Packages: {}", if app_state.config_values[28].is_empty() { "[Press Enter]" } else { &app_state.config_values[28] })),
+        ListItem::new(format!("Flatpak: {}", app_state.config_values[29])),
+        
+        // Boot Configuration
+        ListItem::new(format!("Bootloader: {}", app_state.config_values[30])),
+        ListItem::new(format!("OS Prober: {}", app_state.config_values[31])),
+        ListItem::new(format!("GRUB Theme: {}", app_state.config_values[32])),
+        
+        // Desktop Environment
+        ListItem::new(format!("Desktop Environment: {}", app_state.config_values[33])),
+        ListItem::new(format!("Display Manager: {}", app_state.config_values[34])),
+        
+        // Boot Splash and Final Setup
+        ListItem::new(format!("Plymouth: {}", app_state.config_values[35])),
+        ListItem::new(format!("Plymouth Theme: {}", app_state.config_values[36])),
+        ListItem::new(format!("Numlock on Boot: {}", app_state.config_values[37])),
+        ListItem::new(format!("Git Repository: {}", app_state.config_values[38])),
     ];
 
     let config_list = List::new(config_items)
@@ -2361,7 +2606,11 @@ fn render_popup(f: &mut Frame, app_state: &mut InstallerState) {
     
     // Calculate popup size and position (centered)
     let popup_width = (size.width * 3 / 4).min(60);
-    let popup_height = (size.height * 3 / 4).min(20);
+    let popup_height = if matches!(app_state.popup.popup_type, PopupType::SecureBoot) {
+        (size.height * 4 / 5).min(25) // Larger popup for secure boot warnings
+    } else {
+        (size.height * 3 / 4).min(20)
+    };
     let popup_x = (size.width - popup_width) / 2;
     let popup_y = (size.height - popup_height) / 2;
     
@@ -2403,7 +2652,7 @@ fn render_popup(f: &mut Frame, app_state: &mut InstallerState) {
             f.render_widget(input, chunks[1]);
             
             // Instructions
-            let instructions = Paragraph::new("Type your input and press Enter to confirm, Esc to cancel")
+            let instructions = Paragraph::new("Type your input and press Enter to confirm, Esc to return to main menu")
                 .style(Style::default().fg(Color::Green))
                 .alignment(Alignment::Center);
             f.render_widget(instructions, chunks[2]);
@@ -2442,6 +2691,88 @@ fn render_popup(f: &mut Frame, app_state: &mut InstallerState) {
                 .alignment(Alignment::Left)
                 .block(Block::default().borders(Borders::ALL).title("Command"));
             f.render_widget(input, chunks[2]);
+        }
+        PopupType::SecureBoot => {
+            // Special secure boot popup with warnings
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints([
+                    Constraint::Length(3), // Title
+                    Constraint::Length(15), // Warning text
+                    Constraint::Length(3), // Options list
+                    Constraint::Length(3), // Instructions
+                ])
+                .split(popup_area);
+            
+            // Title
+            let title = Paragraph::new("⚠️ SECURE BOOT WARNING ⚠️")
+                .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                .alignment(Alignment::Center)
+                .block(Block::default().borders(Borders::ALL));
+            f.render_widget(title, chunks[0]);
+            
+            // Warning text
+            let warning_text = "Secure Boot is ONLY needed if:\n\
+• You dual-boot with Windows 11\n\
+• You play games requiring TPM/Secure Boot\n\
+• You have enterprise security requirements\n\n\
+IMPORTANT: Before enabling Secure Boot:\n\
+1. Disable Secure Boot in your UEFI firmware\n\
+2. Clear all existing Secure Boot keys\n\
+3. Ensure your motherboard supports custom key enrollment\n\n\
+WARNING: If not configured properly, your system may not boot!\n\
+Most users should answer 'no' to this question.";
+            
+            let warning = Paragraph::new(warning_text)
+                .style(Style::default().fg(Color::Yellow))
+                .alignment(Alignment::Left)
+                .block(Block::default().borders(Borders::ALL).title("Requirements & Risks"));
+            f.render_widget(warning, chunks[1]);
+            
+            // Options list with scrolling for long lists
+            let total_options = app_state.popup.options.len();
+            let max_visible = (chunks[2].height as usize).saturating_sub(2); // Account for borders
+            
+            let start_index = if total_options > max_visible {
+                let selected = app_state.popup.selected_index;
+                if selected < max_visible / 2 {
+                    0
+                } else if selected >= total_options - max_visible / 2 {
+                    total_options.saturating_sub(max_visible)
+                } else {
+                    selected - max_visible / 2
+                }
+            } else {
+                0
+            };
+            
+            let end_index = (start_index + max_visible).min(total_options);
+            
+            let options: Vec<ListItem> = app_state.popup.options
+                .iter()
+                .enumerate()
+                .skip(start_index)
+                .take(end_index - start_index)
+                .map(|(i, option)| {
+                    let style = if i == app_state.popup.selected_index {
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+                    ListItem::new(option.clone()).style(style)
+                })
+                .collect();
+            
+            let options_list = List::new(options)
+                .block(Block::default().borders(Borders::ALL).title("Your Choice"));
+            f.render_widget(options_list, chunks[2]);
+            
+            // Instructions
+            let instructions = Paragraph::new("Use ↑↓ to navigate, Enter to select, Esc to return to main menu")
+                .style(Style::default().fg(Color::Green))
+                .alignment(Alignment::Center);
+            f.render_widget(instructions, chunks[3]);
         }
         _ => {
             // Selection popup
@@ -2501,7 +2832,7 @@ fn render_popup(f: &mut Frame, app_state: &mut InstallerState) {
             f.render_widget(options_list, chunks[1]);
             
             // Instructions
-            let instructions = Paragraph::new("Use ↑↓ to navigate, Enter to select, Esc to cancel")
+            let instructions = Paragraph::new("Use ↑↓ to navigate, Enter to select, Esc to return to main menu")
                 .style(Style::default().fg(Color::Green))
                 .alignment(Alignment::Center);
             f.render_widget(instructions, chunks[2]);
@@ -2514,4 +2845,340 @@ fn restore_terminal() -> Result<(), Box<dyn std::error::Error>> {
     crossterm::terminal::disable_raw_mode()?;
     crossterm::execute!(stdout(), crossterm::terminal::LeaveAlternateScreen)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    // Test data structures
+    fn create_test_package() -> Package {
+        Package {
+            repo: "core".to_string(),
+            name: "linux".to_string(),
+            version: "6.6.1.arch1-1".to_string(),
+            installed: false,
+            description: "The Linux kernel and modules".to_string(),
+        }
+    }
+
+    fn create_test_installer_state() -> InstallerState {
+        InstallerState {
+            current_phase: "Configuration".to_string(),
+            progress: 0,
+            status_message: "Test status".to_string(),
+            installer_output: vec!["Test output".to_string()],
+            is_running: false,
+            is_complete: false,
+            is_configuring: true,
+            config_step: 0,
+            config_values: vec!["test".to_string(); 39],
+            current_input: "".to_string(),
+            input_mode: false,
+            popup: PopupState {
+                popup_type: PopupType::DiskSelection,
+                is_active: false,
+                selected_index: 0,
+                options: vec!["/dev/sda".to_string()],
+                title: "Test Popup".to_string(),
+                bash_output: vec![],
+                bash_prompt: "$ ".to_string(),
+            },
+            editing_field: None,
+            focus: Focus::Configuration,
+        }
+    }
+
+    #[test]
+    fn test_package_creation() {
+        let package = create_test_package();
+        assert_eq!(package.repo, "core");
+        assert_eq!(package.name, "linux");
+        assert_eq!(package.installed, false);
+    }
+
+    #[test]
+    fn test_installer_state_creation() {
+        let state = create_test_installer_state();
+        assert_eq!(state.current_phase, "Configuration");
+        assert_eq!(state.progress, 0);
+        assert_eq!(state.is_running, false);
+        assert_eq!(state.config_values.len(), 39);
+    }
+
+    #[test]
+    fn test_is_text_input_field() {
+        // Test hostname field (step 23)
+        assert!(is_text_input_field(23));
+        
+        // Test username field (step 24)
+        assert!(is_text_input_field(24));
+        
+        // Test password fields (steps 25, 26)
+        assert!(is_text_input_field(25));
+        assert!(is_text_input_field(26));
+        
+        // Test non-text fields
+        assert!(!is_text_input_field(0)); // Boot mode
+        assert!(!is_text_input_field(4)); // Disk selection
+        assert!(!is_text_input_field(5)); // Partition strategy
+    }
+
+    #[test]
+    fn test_get_selected_packages() {
+        // Test with empty package list - should return default prompt
+        let result = get_selected_packages("core");
+        assert_eq!(result, "[Press Enter]");
+        
+        // Test with package list - should return default prompt when no packages selected
+        let result = get_selected_packages("linux");
+        assert_eq!(result, "[Press Enter]");
+    }
+
+    #[test]
+    fn test_popup_type_options() {
+        // Test disk popup
+        let (options, title) = get_popup_options(&PopupType::DiskSelection);
+        assert!(options.len() > 0);
+        assert_eq!(title, "Select Installation Disk");
+        
+        // Test partition strategy popup
+        let (options, title) = get_popup_options(&PopupType::PartitioningStrategy);
+        assert!(options.len() > 0);
+        assert_eq!(title, "Select Partitioning Strategy");
+        
+        // Test RAID level popup
+        let (options, title) = get_popup_options(&PopupType::RAIDLevel);
+        assert!(options.len() > 0);
+        assert_eq!(title, "Select RAID Level");
+    }
+
+    #[test]
+    fn test_progress_update_parsing() {
+        let json_str = r#"{"message_type":"Progress","phase":"DiskPartitioning","progress":30,"message":"Starting disk partitioning...","timestamp":"2024-01-01T12:00:00Z"}"#;
+        
+        let result: Result<ProgressUpdate, serde_json::Error> = serde_json::from_str(json_str);
+        assert!(result.is_ok());
+        
+        let progress = result.unwrap();
+        assert_eq!(progress.message_type, MessageType::Progress);
+        assert_eq!(progress.phase, InstallationPhase::DiskPartitioning);
+        assert_eq!(progress.progress, 30);
+        assert_eq!(progress.message, "Starting disk partitioning...");
+    }
+
+    #[test]
+    fn test_installer_state_default() {
+        let state = InstallerState::default();
+        assert_eq!(state.current_phase, "Configuration");
+        assert_eq!(state.progress, 0);
+        assert_eq!(state.is_running, false);
+        assert_eq!(state.config_values.len(), 39);
+        assert_eq!(state.config_step, 0);
+    }
+
+    #[test]
+    fn test_popup_state_creation() {
+        let popup = PopupState {
+            popup_type: PopupType::DiskSelection,
+            is_active: true,
+            selected_index: 0,
+            options: vec!["/dev/sda".to_string(), "/dev/sdb".to_string()],
+            title: "Select Disk".to_string(),
+            bash_output: vec![],
+            bash_prompt: "$ ".to_string(),
+        };
+        
+        assert_eq!(popup.popup_type, PopupType::DiskSelection);
+        assert_eq!(popup.is_active, true);
+        assert_eq!(popup.selected_index, 0);
+        assert_eq!(popup.options.len(), 2);
+        assert_eq!(popup.title, "Select Disk");
+    }
+
+    #[test]
+    fn test_installation_phase_enum() {
+        let phase = InstallationPhase::DiskPartitioning;
+        match phase {
+            InstallationPhase::DiskPartitioning => assert!(true),
+            _ => assert!(false),
+        }
+    }
+
+    #[test]
+    fn test_message_type_enum() {
+        let msg_type = MessageType::Progress;
+        match msg_type {
+            MessageType::Progress => assert!(true),
+            _ => assert!(false),
+        }
+    }
+
+    #[test]
+    fn test_popup_type_enum() {
+        let popup_type = PopupType::DiskSelection;
+        match popup_type {
+            PopupType::DiskSelection => assert!(true),
+            _ => assert!(false),
+        }
+    }
+
+    #[test]
+    fn test_config_values_initialization() {
+        let state = create_test_installer_state();
+        
+        // Test that all config values are initialized
+        assert_eq!(state.config_values.len(), 39);
+        
+        // Test specific config values
+        assert_eq!(state.config_values[0], "test"); // Boot mode
+        assert_eq!(state.config_values[23], "test"); // Hostname
+        assert_eq!(state.config_values[24], "test"); // Username
+        assert_eq!(state.config_values[25], "test"); // User password
+        assert_eq!(state.config_values[26], "test"); // Root password
+    }
+
+    #[test]
+    fn test_installer_state_fields() {
+        let mut state = create_test_installer_state();
+        
+        // Test initial state
+        assert_eq!(state.current_input, "");
+        assert_eq!(state.input_mode, false);
+        assert_eq!(state.editing_field, None);
+        assert_eq!(state.is_complete, false);
+        assert_eq!(state.is_configuring, true);
+        
+        // Test state changes
+        state.current_input = "test input".to_string();
+        state.input_mode = true;
+        state.editing_field = Some(0);
+        
+        assert_eq!(state.current_input, "test input");
+        assert_eq!(state.input_mode, true);
+        assert_eq!(state.editing_field, Some(0));
+    }
+
+    #[test]
+    fn test_installer_output() {
+        let mut state = create_test_installer_state();
+        
+        // Test initial output
+        assert_eq!(state.installer_output.len(), 1);
+        assert_eq!(state.installer_output[0], "Test output");
+        
+        // Test adding output
+        state.installer_output.push("New output line".to_string());
+        assert_eq!(state.installer_output.len(), 2);
+        assert_eq!(state.installer_output[1], "New output line");
+    }
+
+    #[test]
+    fn test_config_step_navigation() {
+        let mut state = create_test_installer_state();
+        
+        // Test initial step
+        assert_eq!(state.config_step, 0);
+        
+        // Test step increment
+        state.config_step = 5;
+        assert_eq!(state.config_step, 5);
+        
+        // Test step bounds (should wrap around)
+        state.config_step = 39; // Last config step
+        assert_eq!(state.config_step, 39);
+        
+        // Test start button step
+        state.config_step = 39; // Start button
+        assert_eq!(state.config_step, 39);
+    }
+
+    #[test]
+    fn test_popup_navigation() {
+        let mut popup = PopupState {
+            popup_type: PopupType::DiskSelection,
+            is_active: true,
+            selected_index: 0,
+            options: vec!["/dev/sda".to_string(), "/dev/sdb".to_string(), "/dev/sdc".to_string()],
+            title: "Select Disk".to_string(),
+            bash_output: vec![],
+            bash_prompt: "$ ".to_string(),
+        };
+        
+        // Test initial selection
+        assert_eq!(popup.selected_index, 0);
+        
+        // Test moving down
+        popup.selected_index = 1;
+        assert_eq!(popup.selected_index, 1);
+        
+        // Test wrapping around
+        popup.selected_index = 2; // Last option
+        assert_eq!(popup.selected_index, 2);
+        
+        // Test wrapping back to beginning
+        popup.selected_index = 0;
+        assert_eq!(popup.selected_index, 0);
+    }
+
+    #[test]
+    fn test_progress_update_serialization() {
+        let progress = ProgressUpdate {
+            message_type: MessageType::Progress,
+            phase: InstallationPhase::DiskPartitioning,
+            progress: 30,
+            message: "Starting disk partitioning...".to_string(),
+            timestamp: Some("2024-01-01T12:00:00Z".to_string()),
+        };
+        
+        let json = serde_json::to_string(&progress).unwrap();
+        assert!(json.contains("Progress"));
+        assert!(json.contains("DiskPartitioning"));
+        assert!(json.contains("30"));
+        assert!(json.contains("Starting disk partitioning"));
+    }
+
+    #[test]
+    fn test_installer_state_mutex() {
+        let state = Arc::new(Mutex::new(create_test_installer_state()));
+        
+        // Test that we can lock and modify the state
+        {
+            let mut state_guard = state.lock().unwrap();
+            state_guard.progress = 50;
+            state_guard.current_phase = "Installing".to_string();
+        }
+        
+        // Test that changes persist
+        {
+            let state_guard = state.lock().unwrap();
+            assert_eq!(state_guard.progress, 50);
+            assert_eq!(state_guard.current_phase, "Installing");
+        }
+    }
+
+    #[test]
+    fn test_package_serialization() {
+        let package = create_test_package();
+        
+        let json = serde_json::to_string(&package).unwrap();
+        assert!(json.contains("core"));
+        assert!(json.contains("linux"));
+        assert!(json.contains("6.6.1.arch1-1"));
+        assert!(json.contains("false")); // installed field
+        assert!(json.contains("The Linux kernel"));
+    }
+
+    #[test]
+    fn test_enum_serialization() {
+        let phase = InstallationPhase::PackageInstallation;
+        let json = serde_json::to_string(&phase).unwrap();
+        assert!(json.contains("PackageInstallation"));
+        
+        let msg_type = MessageType::Error;
+        let json = serde_json::to_string(&msg_type).unwrap();
+        assert!(json.contains("Error"));
+    }
 }

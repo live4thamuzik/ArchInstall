@@ -1,0 +1,301 @@
+# Arch Linux Installer Configuration
+# This file contains all configurable options and package lists
+
+# Logging Configuration
+logging:
+  log_file: "/var/log/archinstall.log"
+  log_backup: "/tmp/archinstall.log"
+  log_final: "/mnt/var/log/archinstall.log"
+
+# System Configuration
+system:
+  # User and Authentication
+  main_username: ""
+  root_password: ""
+  main_user_password: ""
+  system_hostname: ""
+  
+  # Localization
+  timezone: "UTC"
+  locale: "en_US.UTF-8"
+  keymap: "us"
+  
+  # Network
+  reflector_country_code: "US"
+  want_wifi_connection: "no"
+
+# Storage Configuration
+storage:
+  install_disk: ""
+  override_boot_mode: "no"
+  boot_mode: "uefi"  # "uefi" or "bios"
+  
+  # Partitioning
+  partition_scheme: ""
+  want_swap: "no"
+  want_home_partition: "no"
+  
+  # Encryption and Advanced Storage
+  want_encryption: "no"
+  want_lvm: "no"
+  want_raid: "no"
+  luks_passphrase: ""
+  raid_level: ""
+  raid_devices: []
+  
+  # Filesystem Types
+  root_filesystem_type: "ext4"
+  home_filesystem_type: "ext4"
+
+# Kernel and Hardware
+kernel:
+  kernel_type: "linux"  # "linux", "linux-lts", "linux-zen", "linux-hardened"
+  cpu_microcode_type: "none"  # "intel", "amd", "none"
+
+# Desktop Environment
+desktop:
+  desktop_environment: "none"
+  display_manager: "none"
+
+# Bootloader
+bootloader:
+  bootloader_type: "grub"  # "grub", "systemd-boot"
+  want_secure_boot: "no"
+  enable_os_prober: "no"
+  want_grub_theme: "no"
+  grub_theme_choice: ""
+
+# Plymouth (Boot Splash)
+plymouth:
+  want_plymouth: "no"
+  want_plymouth_theme: "no"
+  plymouth_theme_choice: ""
+
+# Btrfs Configuration
+btrfs:
+  want_btrfs: "no"
+  want_btrfs_snapshots: "no"
+  btrfs_snapshot_frequency: "daily"
+  btrfs_keep_snapshots: "10"
+  want_btrfs_assistant: "no"
+
+# Package Management
+packages:
+  want_aur_helper: "no"
+  aur_helper_choice: "yay"
+  want_multilib: "no"
+  want_flatpak: "no"
+  
+  # Custom Packages
+  install_custom_packages: "no"
+  custom_packages: ""
+  install_custom_aur_packages: "no"
+  custom_aur_packages: ""
+
+# System Services
+services:
+  time_sync_choice: "ntpd"  # "ntpd", "chrony", "systemd-timesyncd"
+  gpu_driver_type: "auto"  # "auto", "amd", "nvidia", "intel"
+  want_numlock_on_boot: "no"
+
+# User Customization
+customization:
+  want_dotfiles_deployment: "no"
+  dotfiles_repo_url: ""
+  dotfiles_branch: "main"
+
+# Partitioning Strategy Options
+partition_strategies:
+  options:
+    - "auto_simple"
+    - "auto_simple_luks"
+    - "auto_lvm"
+    - "auto_luks_lvm"
+    - "auto_raid_simple"
+    - "auto_raid_lvm"
+    - "manual"
+  
+  functions:
+    - "do_auto_simple_partitioning"
+    - "do_auto_simple_luks_partitioning"
+    - "do_auto_lvm_partitioning"
+    - "do_auto_luks_lvm_partitioning"
+    - "do_auto_raid_simple_partitioning"
+    - "do_auto_raid_lvm_partitioning"
+    - "do_manual_partitioning_guided"
+
+# RAID Configuration
+raid:
+  level_options: ["0", "1", "5", "6", "10"]
+
+# Filesystem Options
+filesystems:
+  options: ["ext4", "xfs", "btrfs", "f2fs"]
+
+# Kernel Types
+kernels:
+  options: ["linux", "linux-lts", "linux-zen", "linux-hardened"]
+
+# Timezone Regions
+timezones:
+  regions:
+    - "Africa"
+    - "America"
+    - "Antarctica"
+    - "Asia"
+    - "Atlantic"
+    - "Australia"
+    - "Europe"
+    - "Indian"
+    - "Pacific"
+
+# Locale Options
+locales:
+  options:
+    - "en_US.UTF-8"
+    - "en_GB.UTF-8"
+    - "de_DE.UTF-8"
+    - "fr_FR.UTF-8"
+    - "es_ES.UTF-8"
+    - "it_IT.UTF-8"
+    - "pt_BR.UTF-8"
+    - "ru_RU.UTF-8"
+    - "zh_CN.UTF-8"
+    - "ja_JP.UTF-8"
+
+# Keymap Options
+keymaps:
+  options:
+    - "us"
+    - "uk"
+    - "de"
+    - "fr"
+    - "es"
+    - "it"
+    - "pt"
+    - "ru"
+    - "zh"
+    - "ja"
+
+# Reflector Country Codes
+reflector:
+  common_countries:
+    - "US"
+    - "CA"
+    - "GB"
+    - "DE"
+    - "FR"
+    - "ES"
+    - "IT"
+    - "NL"
+    - "SE"
+    - "NO"
+    - "FI"
+    - "DK"
+    - "CH"
+    - "AT"
+    - "BE"
+    - "IE"
+    - "PT"
+    - "LU"
+    - "IS"
+    - "JP"
+    - "AU"
+    - "NZ"
+    - "SG"
+    - "HK"
+    - "TW"
+    - "KR"
+    - "CN"
+    - "IN"
+    - "BR"
+    - "MX"
+    - "AR"
+    - "CL"
+    - "ZA"
+
+# Desktop Environment Options
+desktop_environments:
+  options: ["none", "gnome", "kde", "xfce", "hyprland"]
+
+# Display Manager Options
+display_managers:
+  options: ["none", "gdm", "sddm", "lightdm"]
+
+# Bootloader Options
+bootloaders:
+  options: ["grub", "systemd-boot"]
+
+# AUR Helper Options
+aur_helpers:
+  options: ["yay", "paru"]
+
+# Package Lists
+packages:
+  # Base Packages
+  base:
+    bootloader_grub: ["grub", "os-prober"]
+    bootloader_grub_uefi: ["grub", "efibootmgr", "os-prober"]
+    filesystem: ["btrfs-progs", "dosfstools", "e2fsprogs", "f2fs-tools", "xfsprogs"]
+    microcode_intel: ["intel-ucode"]
+    microcode_amd: ["amd-ucode"]
+    time_sync_ntpd: ["ntp"]
+    time_sync_chrony: ["chrony"]
+    time_sync_systemd_timesyncd: ["systemd"]
+    multilib: ["lib32-glibc"]
+    flatpak: ["flatpak"]
+
+  # Desktop Environments
+  desktop_environments:
+    gnome: ["gnome", "gnome-extra"]
+    kde: ["plasma-meta", "kde-applications"]
+    hyprland: ["hyprland", "waybar", "wofi", "alacritty", "firefox"]
+
+  # Display Managers
+  display_managers:
+    gdm: ["gdm"]
+    sddm: ["sddm", "sddm-kcm"]
+    lightdm: ["lightdm", "lightdm-gtk-greeter"]
+
+  # GPU Drivers
+  gpu_drivers:
+    amd: ["mesa", "lib32-mesa", "vulkan-radeon", "lib32-vulkan-radeon", "xf86-video-amdgpu"]
+    nvidia: ["nvidia", "nvidia-utils", "lib32-nvidia-utils", "nvidia-settings"]
+    intel: ["mesa", "lib32-mesa", "vulkan-intel", "lib32-vulkan-intel", "xf86-video-intel"]
+
+# GRUB Theme Sources
+grub_themes:
+  poly_dark: ["poly-dark"]
+  cyberexs: ["cyberexs"]
+  cyberpunk: ["cyberpunk"]
+  hyperfluent: ["hyperfluent"]
+
+# Constants
+constants:
+  initcpio:
+    base_hooks: "base udev autodetect modconf kms keyboard keymap consolefont block filesystems fsck"
+    luks_hook: "encrypt"
+    lvm_hook: "lvm2"
+    raid_hook: "mdadm_udev"
+    nvme_hook: "nvme"
+  
+  grub:
+    timeout_default: "5"
+  
+  flatpak:
+    package: "flatpak"
+  
+  lv_layout:
+    lv_root: "root"
+    lv_swap: "swap"
+    lv_home: "home"
+  
+  lv_mountpoints:
+    lv_root: "/"
+    lv_swap: "swap"
+    lv_home: "/home"
+  
+  lv_fstypes:
+    lv_root: "ext4"
+    lv_swap: "swap"
+    lv_home: "ext4"
