@@ -2209,7 +2209,7 @@ fn render_configuration_ui(f: &mut Frame, app_state: &mut InstallerState) {
         .constraints([
             Constraint::Length(7),  // Header
             Constraint::Length(3),  // Title
-            Constraint::Max(25),    // Configuration options (limit to ~25 lines to force scrolling)
+            Constraint::Min(10),    // Configuration options
             Constraint::Length(3),  // Instructions
             Constraint::Length(3),  // Start button
         ])
@@ -2591,27 +2591,31 @@ fn render_config(f: &mut Frame, area: Rect, app_state: &mut InstallerState) {
     let available_height = area.height.saturating_sub(2); // Account for borders
     let total_items = config_items.len();
     
+    // Force scrolling by limiting visible items to a reasonable number
+    let max_visible_items = 20; // Show max 20 items at once
+    let effective_height = available_height.min(max_visible_items as u16);
+    
     // Ensure scroll offset doesn't exceed bounds
     if app_state.config_scroll_offset >= total_items {
         app_state.config_scroll_offset = total_items.saturating_sub(1);
     }
     
     // Calculate which items to show
-    let visible_items: Vec<ListItem> = if total_items <= available_height as usize {
+    let visible_items: Vec<ListItem> = if total_items <= effective_height as usize {
         // All items fit, no scrolling needed
         config_items
     } else {
         // Need to scroll - show subset of items
         let start_idx = app_state.config_scroll_offset;
-        let end_idx = (start_idx + available_height as usize).min(total_items);
+        let end_idx = (start_idx + effective_height as usize).min(total_items);
         
         config_items.into_iter().skip(start_idx).take((end_idx - start_idx) as usize).collect()
     };
     
     // Create scroll indicators in title if needed
-    let title = if total_items > available_height as usize {
-        let current_page = app_state.config_scroll_offset / available_height as usize + 1;
-        let total_pages = (total_items + available_height as usize - 1) / available_height as usize;
+    let title = if total_items > effective_height as usize {
+        let current_page = app_state.config_scroll_offset / effective_height as usize + 1;
+        let total_pages = (total_items + effective_height as usize - 1) / effective_height as usize;
         format!("Configuration (Page {}/{} - ↑↓ Scroll)", current_page, total_pages)
     } else {
         "Configuration".to_string()
