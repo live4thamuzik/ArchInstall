@@ -1062,7 +1062,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                                 state.editing_field = None;
                                                 state.current_input.clear();
                                                 }
-                                        } else if state.config_step == 39 {
+                                        } else if state.config_step == 84 {
                                             // Start button pressed - begin installation
                                             state.is_configuring = false;
                                             state.is_running = true;
@@ -1286,7 +1286,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                 } else {
                                     // Navigate configuration options
-                                    if state.config_step < 39 {
+                                    if state.config_step < 84 {
                                         state.config_step += 1;
                                         // Auto-scroll if needed - calculate if current step is beyond visible area
                                         // We need to know the available height to determine when to scroll
@@ -1294,7 +1294,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                         if state.config_step >= state.config_scroll_offset + 15 { // Assume ~15 visible items
                                             state.config_scroll_offset = state.config_step.saturating_sub(14); // Keep some items above
                                         }
-                                    } else if state.config_step == 39 {
+                                    } else if state.config_step == 84 {
                                         // Wrap around to first option
                                         state.config_step = 0;
                                         state.config_scroll_offset = 0; // Reset scroll to top
@@ -1326,7 +1326,7 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                             let mut state = app_state.lock().unwrap();
                             if state.is_configuring && !state.popup.is_active {
                                 if let Focus::Configuration = state.focus {
-                                    let total_items = 39; // Total number of config items
+                                    let total_items = 85; // Total number of config items
                                     // Scroll down by 10 items (about a page)
                                     let new_offset = (state.config_scroll_offset + 10).min((total_items as usize).saturating_sub(1));
                                     state.config_scroll_offset = new_offset;
@@ -1352,8 +1352,8 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                             let mut state = app_state.lock().unwrap();
                             if state.is_configuring && !state.popup.is_active {
                                 if let Focus::Configuration = state.focus {
-                                    state.config_scroll_offset = 39; // Last config item
-                                    state.config_step = 39;
+                                    state.config_scroll_offset = 84; // Last config item
+                                    state.config_step = 84;
                                 }
                             }
                         }
@@ -2001,39 +2001,39 @@ fn run_actual_installer(app_state: Arc<Mutex<InstallerState>>, config_values: Ve
     let stderr_handle = child.stderr.take().map(|stderr| thread::spawn(move || {
             let reader = BufReader::new(stderr);
         for line in reader.lines().map_while(Result::ok) {
-            // Try to parse as JSON progress update first
-            if let Ok(progress_update) = serde_json::from_str::<ProgressUpdate>(&line) {
-                // Update app state with parsed progress
-                update_app_state_from_progress(&stderr_app_state, &progress_update);
-            } else {
-                // If not JSON, treat as regular output/error
-                let mut state = stderr_app_state.lock().unwrap();
-                state.installer_output.push(line.clone());
-                if state.installer_output.len() > 50 {
-                    state.installer_output.remove(0);
+                    // Try to parse as JSON progress update first
+                    if let Ok(progress_update) = serde_json::from_str::<ProgressUpdate>(&line) {
+                        // Update app state with parsed progress
+                        update_app_state_from_progress(&stderr_app_state, &progress_update);
+                    } else {
+                        // If not JSON, treat as regular output/error
+                        let mut state = stderr_app_state.lock().unwrap();
+                        state.installer_output.push(line.clone());
+                        if state.installer_output.len() > 50 {
+                            state.installer_output.remove(0);
+                        }
+                        
+                        // Check if it looks like an error
+                        if line.to_lowercase().contains("error") || line.to_lowercase().contains("failed") {
+                            state.status_message = format!("Error: {}", line);
+                        }
+                    }
                 }
-                
-                // Check if it looks like an error
-                if line.to_lowercase().contains("error") || line.to_lowercase().contains("failed") {
-                    state.status_message = format!("Error: {}", line);
-                }
-            }
-        }
     }));
 
     // Handle stdout for general output
     if let Some(stdout) = child.stdout.take() {
         let reader = BufReader::new(stdout);
         for line in reader.lines().map_while(Result::ok) {
-            // Add stdout to output log
-            let mut state = app_state.lock().unwrap();
-            state.installer_output.push(line.clone());
-            if state.installer_output.len() > 50 {
-                state.installer_output.remove(0);
-            }
-            
-            // Also try to parse for any fallback progress indicators
-            parse_installer_output(&app_state, &line);
+                // Add stdout to output log
+                let mut state = app_state.lock().unwrap();
+                state.installer_output.push(line.clone());
+                if state.installer_output.len() > 50 {
+                    state.installer_output.remove(0);
+                }
+                
+                // Also try to parse for any fallback progress indicators
+                parse_installer_output(&app_state, &line);
         }
     }
     
@@ -2398,7 +2398,7 @@ fn render_configuration_ui(f: &mut Frame, app_state: &mut InstallerState) {
     f.render_widget(instruction_text, chunks[3]);
 
     // Start button
-    let start_button_text = if app_state.config_step == 39 {
+    let start_button_text = if app_state.config_step == 84 {
         "> START INSTALLATION <"
     } else {
         "  START INSTALLATION  "
@@ -2406,7 +2406,7 @@ fn render_configuration_ui(f: &mut Frame, app_state: &mut InstallerState) {
     let start_button = Paragraph::new(start_button_text)
         .block(Block::default().borders(Borders::ALL))
         .alignment(Alignment::Center)
-        .style(if app_state.config_step == 39 { 
+        .style(if app_state.config_step == 84 { 
             Style::default().fg(Color::Black).bg(Color::Green) 
         } else { 
             Style::default().fg(Color::Green) 
