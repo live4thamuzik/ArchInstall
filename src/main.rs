@@ -2600,26 +2600,19 @@ fn render_config(f: &mut Frame, area: Rect, app_state: &mut InstallerState) {
         app_state.config_scroll_offset = total_items.saturating_sub(1);
     }
     
-    // Calculate which items to show
-    let visible_items: Vec<ListItem> = if total_items <= effective_height as usize {
-        // All items fit, no scrolling needed
-        config_items
-    } else {
-        // Need to scroll - show subset of items
-        let start_idx = app_state.config_scroll_offset;
-        let end_idx = (start_idx + effective_height as usize).min(total_items);
-        
-        config_items.into_iter().skip(start_idx).take((end_idx - start_idx) as usize).collect()
-    };
+    // Calculate which items to show - Always scroll since we have 85 items
+    let start_idx = app_state.config_scroll_offset;
+    let end_idx = (start_idx + effective_height as usize).min(total_items);
     
-    // Create scroll indicators in title if needed
-    let title = if total_items > effective_height as usize {
-        let current_page = app_state.config_scroll_offset / effective_height as usize + 1;
-        let total_pages = (total_items + effective_height as usize - 1) / effective_height as usize;
-        format!("Configuration (Page {}/{} - ↑↓ Scroll)", current_page, total_pages)
-    } else {
-        "Configuration".to_string()
-    };
+    let visible_items: Vec<ListItem> = config_items.into_iter()
+        .skip(start_idx)
+        .take((end_idx - start_idx) as usize)
+        .collect();
+    
+    // Create scroll indicators in title - Always show since we have 85 items
+    let current_page = app_state.config_scroll_offset / effective_height as usize + 1;
+    let total_pages = (total_items + effective_height as usize - 1) / effective_height as usize;
+    let title = format!("Configuration (Page {}/{} - ↑↓ Scroll)", current_page, total_pages);
 
     let config_list = List::new(visible_items)
         .block(Block::default().title(title).borders(Borders::ALL));
