@@ -679,6 +679,7 @@ pub struct InstallerState {
     pub editing_field: Option<usize>, // Which field is being edited (None = not editing)
     pub focus: Focus,
     pub config_scroll_offset: usize, // Scroll offset for configuration list
+    pub config_visible_height: usize, // Height of visible configuration area
 }
 
 impl Default for InstallerState {
@@ -768,6 +769,7 @@ impl Default for InstallerState {
             },
             focus: Focus::Configuration,
             config_scroll_offset: 0,
+            config_visible_height: 20,
         }
     }
 }
@@ -1253,13 +1255,13 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                     // Navigate configuration options
                                     if state.config_step > 0 {
                                         state.config_step -= 1;
-                                        // Auto-scroll if needed
-                                        if state.config_scroll_offset > 0 && state.config_step < state.config_scroll_offset {
+                                        // Auto-scroll if needed to keep selected item visible
+                                        if state.config_step < state.config_scroll_offset {
                                             state.config_scroll_offset = state.config_step;
                                         }
                                     } else if state.config_step == 0 {
                                         // Wrap around to start button
-                                        state.config_step = 39;
+                                        state.config_step = 84;
                                     }
                                 }
                             }
@@ -1288,11 +1290,10 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                     // Navigate configuration options
                                     if state.config_step < 84 {
                                         state.config_step += 1;
-                                        // Auto-scroll if needed - calculate if current step is beyond visible area
-                                        // We need to know the available height to determine when to scroll
-                                        // For now, we'll scroll when we're past the current scroll offset + some buffer
-                                        if state.config_step >= state.config_scroll_offset + 15 { // Assume ~15 visible items
-                                            state.config_scroll_offset = state.config_step.saturating_sub(14); // Keep some items above
+                                        // Auto-scroll if needed to keep selected item visible
+                                        let visible_height = state.config_visible_height;
+                                        if state.config_step >= state.config_scroll_offset + visible_height {
+                                            state.config_scroll_offset = state.config_step.saturating_sub(visible_height.saturating_sub(1));
                                         }
                                     } else if state.config_step == 84 {
                                         // Wrap around to first option
@@ -2587,32 +2588,38 @@ fn render_config(f: &mut Frame, area: Rect, app_state: &mut InstallerState) {
         ListItem::new(format!("Git Repository: {}", app_state.config_values[38])),
     ];
 
-    // Calculate visible items based on available height
+    // Calculate visible items based on actual available height
     let available_height = area.height.saturating_sub(2); // Account for borders
     let total_items = config_items.len();
     
-    // Force scrolling by limiting visible items to a reasonable number
-    let max_visible_items = 20; // Show max 20 items at once
-    let effective_height = available_height.min(max_visible_items as u16);
+    // Update the visible height for auto-scrolling calculations
+    app_state.config_visible_height = available_height as usize;
     
     // Ensure scroll offset doesn't exceed bounds
     if app_state.config_scroll_offset >= total_items {
         app_state.config_scroll_offset = total_items.saturating_sub(1);
     }
     
-    // Calculate which items to show - Always scroll since we have 85 items
-    let start_idx = app_state.config_scroll_offset;
-    let end_idx = (start_idx + effective_height as usize).min(total_items);
+    // Calculate which items to show based on actual screen space
+    let visible_items: Vec<ListItem> = if total_items <= available_height as usize {
+        // All items fit, no scrolling needed
+        config_items
+    } else {
+        // Need to scroll - show subset of items
+        let start_idx = app_state.config_scroll_offset;
+        let end_idx = (start_idx + available_height as usize).min(total_items);
+        
+        config_items.into_iter().skip(start_idx).take((end_idx - start_idx) as usize).collect()
+    };
     
-    let visible_items: Vec<ListItem> = config_items.into_iter()
-        .skip(start_idx)
-        .take((end_idx - start_idx) as usize)
-        .collect();
-    
-    // Create scroll indicators in title - Always show since we have 85 items
-    let current_page = app_state.config_scroll_offset / effective_height as usize + 1;
-    let total_pages = (total_items + effective_height as usize - 1) / effective_height as usize;
-    let title = format!("Configuration (Page {}/{} - ↑↓ Scroll)", current_page, total_pages);
+    // Create scroll indicators in title if needed
+    let title = if total_items > available_height as usize {
+        let current_page = app_state.config_scroll_offset / available_height as usize + 1;
+        let total_pages = (total_items + available_height as usize - 1) / available_height as usize;
+        format!("Configuration (Page {}/{} - ↑↓ Scroll)", current_page, total_pages)
+    } else {
+        "Configuration".to_string()
+    };
 
     let config_list = List::new(visible_items)
         .block(Block::default().title(title).borders(Borders::ALL));
@@ -2971,6 +2978,7 @@ mod tests {
             editing_field: None,
             focus: Focus::Configuration,
             config_scroll_offset: 0,
+            config_visible_height: 20,
         }
     }
 
