@@ -2209,7 +2209,7 @@ fn render_configuration_ui(f: &mut Frame, app_state: &mut InstallerState) {
         .constraints([
             Constraint::Length(7),  // Header
             Constraint::Length(3),  // Title
-            Constraint::Min(10),    // Configuration options
+            Constraint::Max(25),    // Configuration options (limit to ~25 lines to force scrolling)
             Constraint::Length(3),  // Instructions
             Constraint::Length(3),  // Start button
         ])
