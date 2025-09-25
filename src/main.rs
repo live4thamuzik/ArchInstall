@@ -679,6 +679,7 @@ pub struct InstallerState {
     pub editing_field: Option<usize>, // Which field is being edited (None = not editing)
     pub focus: Focus,
     pub config_scroll_offset: usize, // Scroll offset for configuration list
+    pub config_visible_height: usize, // Height of visible configuration area
 }
 
 impl Default for InstallerState {
@@ -768,6 +769,7 @@ impl Default for InstallerState {
             },
             focus: Focus::Configuration,
             config_scroll_offset: 0,
+            config_visible_height: 20, // Initial default, updated dynamically
         }
     }
 }
@@ -1258,8 +1260,16 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                             state.config_scroll_offset = state.config_step;
                                         }
                                     } else if state.config_step == 0 {
-                                        // Wrap around to start button
+                                        // Wrap around to START button
                                         state.config_step = 39;
+                                    } else if state.config_step == 39 {
+                                        // Move from START button to last config item
+                                        state.config_step = 38;
+                                        // Scroll to show the last item
+                                        let visible_height = state.config_visible_height;
+                                        if state.config_step >= visible_height {
+                                            state.config_scroll_offset = state.config_step.saturating_sub(visible_height.saturating_sub(1));
+                                        }
                                     }
                                 }
                             }
@@ -1286,16 +1296,18 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                 } else {
                                     // Navigate configuration options
-                                    if state.config_step < 39 {
+                                    if state.config_step < 38 { // Total items is 39, so max index is 38
                                         state.config_step += 1;
-                                        // Auto-scroll if needed - calculate if current step is beyond visible area
-                                        // We need to know the available height to determine when to scroll
-                                        // For now, we'll scroll when we're past the current scroll offset + some buffer
-                                        if state.config_step >= state.config_scroll_offset + 15 { // Assume ~15 visible items
-                                            state.config_scroll_offset = state.config_step.saturating_sub(14); // Keep some items above
+                                        // Auto-scroll if needed - use dynamic visible height
+                                        let visible_height = state.config_visible_height;
+                                        if state.config_step >= state.config_scroll_offset + visible_height {
+                                            state.config_scroll_offset = state.config_step.saturating_sub(visible_height.saturating_sub(1));
                                         }
+                                    } else if state.config_step == 38 {
+                                        // Move to START INSTALLATION button
+                                        state.config_step = 39;
                                     } else if state.config_step == 39 {
-                                        // Wrap around to first option
+                                        // Wrap around from START button to first option
                                         state.config_step = 0;
                                         state.config_scroll_offset = 0; // Reset scroll to top
                                     }
@@ -1307,9 +1319,10 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                             let mut state = app_state.lock().unwrap();
                             if state.is_configuring && !state.popup.is_active {
                                 if let Focus::Configuration = state.focus {
-                                    // Scroll up by 10 items (about a page)
-                                    if state.config_scroll_offset >= 10 {
-                                        state.config_scroll_offset -= 10;
+                                    // Scroll up by visible height (about a page)
+                                    let scroll_amount = state.config_visible_height;
+                                    if state.config_scroll_offset >= scroll_amount {
+                                        state.config_scroll_offset -= scroll_amount;
                                         // Adjust config_step to stay in visible area
                                         if state.config_step < state.config_scroll_offset {
                                             state.config_step = state.config_scroll_offset;
@@ -1327,8 +1340,9 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                             if state.is_configuring && !state.popup.is_active {
                                 if let Focus::Configuration = state.focus {
                                     let total_items = 39; // Total number of config items
-                                    // Scroll down by 10 items (about a page)
-                                    let new_offset = (state.config_scroll_offset + 10).min((total_items as usize).saturating_sub(1));
+                                    // Scroll down by visible height (about a page)
+                                    let scroll_amount = state.config_visible_height;
+                                    let new_offset = (state.config_scroll_offset + scroll_amount).min((total_items as usize).saturating_sub(1));
                                     state.config_scroll_offset = new_offset;
                                     // Adjust config_step to stay in visible area
                                     if state.config_step < state.config_scroll_offset {
@@ -1352,8 +1366,8 @@ fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                             let mut state = app_state.lock().unwrap();
                             if state.is_configuring && !state.popup.is_active {
                                 if let Focus::Configuration = state.focus {
-                                    state.config_scroll_offset = 39; // Last config item
-                                    state.config_step = 39;
+                                    state.config_scroll_offset = 38; // Last config item
+                                    state.config_step = 38;
                                 }
                             }
                         }
@@ -2381,8 +2395,41 @@ fn render_configuration_ui(f: &mut Frame, app_state: &mut InstallerState) {
             .style(if app_state.config_step == 38 { Style::default().fg(Color::Yellow) } else { Style::default() }),
     ];
 
-    let config_list = List::new(config_items)
-        .block(Block::default().title("Configuration Options").borders(Borders::ALL));
+    // Implement scrolling logic for the configuration list
+    let available_height = chunks[2].height.saturating_sub(2); // Account for borders
+    let total_items = config_items.len();
+    
+    // Update the visible height for auto-scrolling calculations
+    app_state.config_visible_height = available_height as usize;
+    
+    // Ensure scroll offset doesn't exceed bounds
+    if app_state.config_scroll_offset >= total_items {
+        app_state.config_scroll_offset = total_items.saturating_sub(1);
+    }
+    
+    // Calculate which items to show based on scroll offset and available height
+    let visible_items: Vec<ListItem> = if total_items <= available_height as usize {
+        // All items fit, no scrolling needed
+        config_items
+    } else {
+        // Need to scroll - show subset of items
+        let start_idx = app_state.config_scroll_offset;
+        let end_idx = (start_idx + available_height as usize).min(total_items);
+        
+        config_items.into_iter().skip(start_idx).take((end_idx - start_idx) as usize).collect()
+    };
+    
+    // Create scroll indicators in title if needed
+    let title = if total_items > available_height as usize {
+        let current_page = app_state.config_scroll_offset / available_height as usize + 1;
+        let total_pages = (total_items + available_height as usize - 1) / available_height as usize;
+        format!("Configuration Options (Page {}/{} - ↑↓ Scroll)", current_page, total_pages)
+    } else {
+        "Configuration Options".to_string()
+    };
+
+    let config_list = List::new(visible_items)
+        .block(Block::default().title(title).borders(Borders::ALL));
     f.render_widget(config_list, chunks[2]);
 
     // Instructions
