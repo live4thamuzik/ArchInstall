@@ -1089,8 +1089,6 @@ search_packages() {
             echo "$package_name|$version|$installed|$repo|$description"
         fi
     done
-
-    return $?
 }
 
 # Searches for AUR packages using available AUR helper or curl
@@ -1165,8 +1163,6 @@ search_aur_packages() {
             return 1
         fi
     fi
-    
-    return $?
 }
 
 # =============================================================================
