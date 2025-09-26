@@ -34,8 +34,8 @@ chmod +x *.sh
 # Run TUI installer (recommended)
 ./archinstall-tui
 
-# Or use launcher
-./launch_tui_installer.sh
+# Direct execution (recommended)
+./target/release/archinstall-tui
 ```
 
 ## 📖 Usage Guide
