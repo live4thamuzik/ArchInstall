@@ -128,7 +128,7 @@ BOOT_MODE="uefi"              # "uefi" or "bios" (auto-detected, can be overridd
 WANT_WIFI_CONNECTION="no"     # "yes" or "no". Default to "no".
 
 # shellcheck disable=SC2034
-PARTITION_SCHEME=""           # e.g., "auto_simple", "auto_luks_lvm", "auto_raid_luks_lvm", "manual". Blank initially.
+PARTITION_SCHEME="${PARTITION_SCHEME:-}"           # e.g., "auto_simple", "auto_luks_lvm", "auto_raid_luks_lvm", "manual". Blank initially.
 # shellcheck disable=SC2034
 WANT_SWAP="no"                # "yes" or "no". Default to "no".
 # shellcheck disable=SC2034

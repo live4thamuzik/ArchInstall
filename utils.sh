@@ -892,6 +892,12 @@ configure_mirrors_live() {
     log_info "Configuring pacman mirrors for faster downloads using reflector for country: $country_code..."
     local mirrorlist_path="/etc/pacman.d/mirrorlist"
 
+    # In TUI mode, skip mirror configuration if we don't have root permissions
+    if [ "${TUI_MODE:-}" == "true" ] && [ "$EUID" -ne 0 ]; then
+        log_info "Skipping mirror configuration in TUI mode (no root permissions)"
+        return 0
+    fi
+
     if [ -f "$mirrorlist_path" ]; then
         log_info "Backing up current mirrorlist."
         cp "$mirrorlist_path" "${mirrorlist_path}.backup" || log_warn "Failed to backup mirrorlist."
@@ -2060,6 +2066,13 @@ verify_boot_mode() {
 # Sets console keymap in live environment
 set_console_keymap_live() {
     log_info "Setting console keymap to $KEYMAP..."
+    
+    # In TUI mode, skip keymap setting if we don't have root permissions
+    if [ "${TUI_MODE:-}" == "true" ] && [ "$EUID" -ne 0 ]; then
+        log_info "Skipping console keymap setting in TUI mode (no root permissions)"
+        return 0
+    fi
+    
     loadkeys "$KEYMAP" || log_warn "Failed to set console keymap (continuing anyway)"
 }
 
