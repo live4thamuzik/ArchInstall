@@ -1097,44 +1097,76 @@ search_aur_packages() {
     
     # Method 1: Try using available AUR helper
     if command -v paru &> /dev/null; then
-        paru -Ss "$search_term" 2>/dev/null | while IFS= read -r line; do
-            if [[ $line =~ ^aur/ ]]; then
-                # This is a package line
-                read -r repo_name version installed_flag <<< "$line"
-                package_name="${repo_name#aur/}"
-                installed="false"
-                if [[ "$installed_flag" == "[installed]" ]]; then
-                    installed="true"
-                fi
-                
-                # Read the next line for description
-                read -r description
-                description="${description#    }"  # Remove leading spaces
-                
-                # Output in pipe-delimited format
-                echo "$package_name|$version|$installed|aur|$description"
+        # Create temporary files to capture clean output
+        local temp_file=$(mktemp)
+        local full_output_file=$(mktemp)
+        
+        # Run paru once and capture full output
+        paru -Ss "$search_term" 2>/dev/null > "$full_output_file"
+        
+        # Filter AUR packages to temp file
+        grep -E "^aur/" "$full_output_file" > "$temp_file"
+        
+        # Process the clean output
+        while IFS= read -r line; do
+            # This is a package line
+            read -r repo_name version installed_flag <<< "$line"
+            package_name="${repo_name#aur/}"
+            installed="false"
+            if [[ "$installed_flag" == "[installed]" ]]; then
+                installed="true"
             fi
-        done
+            
+            # Get description from the cached full output
+            local description=$(grep -A1 "^$repo_name" "$full_output_file" | tail -1 | sed 's/^[[:space:]]*//')
+            
+            # Fallback description if none found
+            if [[ -z "$description" ]]; then
+                description="AUR package"
+            fi
+            
+            # Output in pipe-delimited format
+            echo "$package_name|$version|$installed|aur|$description"
+        done < "$temp_file"
+        
+        # Clean up
+        rm -f "$temp_file" "$full_output_file"
     
     elif command -v yay &> /dev/null; then
-        yay -Ss "$search_term" 2>/dev/null | while IFS= read -r line; do
-            if [[ $line =~ ^aur/ ]]; then
-                # This is a package line
-                read -r repo_name version installed_flag <<< "$line"
-                package_name="${repo_name#aur/}"
-                installed="false"
-                if [[ "$installed_flag" == "[installed]" ]]; then
-                    installed="true"
-                fi
-                
-                # Read the next line for description
-                read -r description
-                description="${description#    }"  # Remove leading spaces
-                
-                # Output in pipe-delimited format
-                echo "$package_name|$version|$installed|aur|$description"
+        # Create temporary files to capture clean output
+        local temp_file=$(mktemp)
+        local full_output_file=$(mktemp)
+        
+        # Run yay once and capture full output
+        yay -Ss "$search_term" 2>/dev/null > "$full_output_file"
+        
+        # Filter AUR packages to temp file
+        grep -E "^aur/" "$full_output_file" > "$temp_file"
+        
+        # Process the clean output
+        while IFS= read -r line; do
+            # This is a package line
+            read -r repo_name version installed_flag <<< "$line"
+            package_name="${repo_name#aur/}"
+            installed="false"
+            if [[ "$installed_flag" == "[installed]" ]]; then
+                installed="true"
             fi
-        done
+            
+            # Get description from the cached full output
+            local description=$(grep -A1 "^$repo_name" "$full_output_file" | tail -1 | sed 's/^[[:space:]]*//')
+            
+            # Fallback description if none found
+            if [[ -z "$description" ]]; then
+                description="AUR package"
+            fi
+            
+            # Output in pipe-delimited format
+            echo "$package_name|$version|$installed|aur|$description"
+        done < "$temp_file"
+        
+        # Clean up
+        rm -f "$temp_file" "$full_output_file"
     
     else
         # Method 2: Use curl to search AUR web interface (fallback)

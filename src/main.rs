@@ -347,14 +347,14 @@ impl FloatContent for PackageSelection {
                 .collect();
 
             let search_list = List::new(package_items)
-                .block(block.title("Search Results - ↑↓ Navigate | Enter Toggle Selection | 'q' Exit"))
+                .block(block.title("Search Results - ↑↓ Navigate | Enter Toggle Selection | Esc Exit"))
                 .highlight_style(Style::default().fg(Color::LightGreen).add_modifier(Modifier::BOLD))
                 .highlight_symbol(">> ");
 
             frame.render_stateful_widget(search_list, area, &mut self.list_state);
             
             // Add instructions at the bottom
-            let instruction_text = "↑↓ Navigate | Enter Toggle Selection | 'q' Exit Search";
+            let instruction_text = "↑↓ Navigate | Enter Toggle Selection | Esc Exit Search";
             let instruction_para = Paragraph::new(instruction_text)
                 .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
                 .alignment(Alignment::Center);
@@ -1448,7 +1448,9 @@ fn call_script(script_path: &str, args: &[&str]) -> Result<Vec<String>, String> 
 
 // Helper function to call Bash functions and get their output
 fn call_bash_function(script_path: &str, function_name: &str, args: &[&str]) -> Result<Vec<String>, String> {
-    let mut cmd = Command::new("bash");
+    let mut cmd = Command::new("timeout");
+    cmd.arg("20"); // 20 second timeout
+    cmd.arg("bash");
     cmd.arg("-c");
     
     // Build the command to source the script and call the function
@@ -3021,6 +3023,7 @@ mod tests {
             editing_field: None,
             focus: Focus::Configuration,
             config_scroll_offset: 0,
+            config_visible_height: 20,
         }
     }
 
