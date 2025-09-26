@@ -25,12 +25,13 @@ setup_logging() {
         echo ""
     } > "$LOG_FILE"
     
-    # Create backup log file (always accessible)
-    cp "$LOG_FILE" "$LOG_BACKUP"
+    # Create backup log file (always accessible) - only if different paths
+    if [ "$LOG_FILE" != "$LOG_BACKUP" ]; then
+        cp "$LOG_FILE" "$LOG_BACKUP"
+    fi
     
-    log_info "Logging initialized: $LOG_FILE"
-    log_info "Backup log available at: $LOG_BACKUP"
-    log_info "Log files will be preserved for troubleshooting"
+    # Note: Logging initialized successfully
+    # (Don't use log_info here as it creates a circular dependency)
 }
 
 # Function to ensure log files are always accessible
@@ -118,7 +119,7 @@ readonly BOOT_PART_SIZE_MIB=2048
 
 # --- Installation Parameters (Populated by dialogs.sh or defaults) ---
 # shellcheck disable=SC2034
-INSTALL_DISK=""               # Primary disk selected by user (e.g., /dev/sda). Blank initially.
+INSTALL_DISK="${INSTALL_DISK:-}"               # Primary disk selected by user (e.g., /dev/sda). Blank initially.
 # shellcheck disable=SC2034
 OVERRIDE_BOOT_MODE="no"       # "yes" if user forces BIOS mode. Default to "no".
 # shellcheck disable=SC2034
@@ -164,11 +165,11 @@ KEYMAP="us"                   # Default console keymap.
 
 REFLECTOR_COUNTRY_CODE="US"   # Default country for reflector mirrors.
 
-SYSTEM_HOSTNAME=""            # Populated by dialogs.sh. Blank initially.
+SYSTEM_HOSTNAME="${SYSTEM_HOSTNAME:-}"            # Populated by dialogs.sh. Blank initially.
 # shellcheck disable=SC2034
 ROOT_PASSWORD=""              # Populated by dialogs.sh (securely handled). Blank initially.
 # shellcheck disable=SC2034
-MAIN_USERNAME=""              # Populated by dialogs.sh. Blank initially.
+MAIN_USERNAME="${MAIN_USERNAME:-}"              # Populated by dialogs.sh. Blank initially.
 # shellcheck disable=SC2034
 MAIN_USER_PASSWORD=""         # Populated by dialogs.sh. Blank initially.
 

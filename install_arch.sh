@@ -16,6 +16,8 @@
 set -euo pipefail
 
 # --- Source all necessary script files ---
+# Source configuration first
+source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 # Source YAML parser first
 source "$(dirname "${BASH_SOURCE[0]}")/yaml_parser.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
@@ -30,14 +32,17 @@ fi
 # --- Phase Functions ---
 # Phase 0: Initialize and validate configuration
 phase_initialization() {
-    # Load YAML configuration first
-    load_yaml_config "config.yaml" || error_exit "Failed to load YAML configuration"
-    
-    # Initialize enhanced logging system
+    # Initialize enhanced logging system first
     setup_logging
     
-    # TUI integration - progress tracking handled by TUI process
+    # Load YAML configuration (skip if in TUI mode)
+    if [ "${TUI_MODE:-}" != "true" ]; then
+        load_yaml_config "config.yaml" || error_exit "Failed to load YAML configuration"
+    else
+        log_info "Running in TUI mode - skipping YAML configuration loading"
+    fi
     
+    # TUI integration - progress tracking handled by TUI process
     log_header "Arch Linux Automated Installer"
     
     # Show log access information at the start

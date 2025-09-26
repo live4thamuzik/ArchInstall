@@ -324,13 +324,20 @@ EOF
 # --- System Checks ---
 check_prerequisites() {
     log_info "Checking prerequisites..."
-    if [ "$EUID" -ne 0 ]; then
+    
+    # In TUI mode, we don't require root at this stage (will escalate later)
+    if [ "${TUI_MODE:-}" != "true" ] && [ "$EUID" -ne 0 ]; then
         error_exit "This script must be run as root."
     fi
 
-    log_info "Checking internet connection (pinging archlinux.org)..."
-    if ! ping -c 1 -W 2 archlinux.org &>/dev/null; then
-        error_exit "No active internet connection detected."
+    # In TUI mode, skip internet check as it will be handled by the TUI
+    if [ "${TUI_MODE:-}" != "true" ]; then
+        log_info "Checking internet connection (pinging archlinux.org)..."
+        if ! ping -c 1 -W 2 archlinux.org &>/dev/null; then
+            error_exit "No active internet connection detected."
+        fi
+    else
+        log_info "Skipping internet check in TUI mode"
     fi
     log_info "Prerequisites met."
 }
@@ -1117,6 +1124,11 @@ secure_password_input() {
 # --- Logging Configuration ---
 # Enhanced logging with automatic log file creation and backup
 setup_logging() {
+    # Use backup log location if we don't have permission to write to /var/log
+    if [ ! -w "$(dirname "$LOG_FILE")" ] 2>/dev/null; then
+        LOG_FILE="$LOG_BACKUP"
+    fi
+    
     # Create log directory if it doesn't exist
     mkdir -p "$(dirname "$LOG_FILE")"
     
@@ -1131,12 +1143,13 @@ setup_logging() {
         echo ""
     } > "$LOG_FILE"
     
-    # Create backup log file (always accessible)
-    cp "$LOG_FILE" "$LOG_BACKUP"
+    # Create backup log file (always accessible) - only if different paths
+    if [ "$LOG_FILE" != "$LOG_BACKUP" ]; then
+        cp "$LOG_FILE" "$LOG_BACKUP"
+    fi
     
-    log_info "Logging initialized: $LOG_FILE"
-    log_info "Backup log available at: $LOG_BACKUP"
-    log_info "Log files will be preserved for troubleshooting"
+    # Note: Logging initialized successfully
+    # (Don't use log_info here as it creates a circular dependency)
 }
 
 # Function to ensure log files are always accessible

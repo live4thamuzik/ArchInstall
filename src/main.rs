@@ -2000,10 +2000,9 @@ fn run_actual_installer(app_state: Arc<Mutex<InstallerState>>, config_values: Ve
     env_vars.insert("WANT_DOTFILES_DEPLOYMENT".to_string(), if config_values.get(38).unwrap_or(&String::new()).is_empty() { "no".to_string() } else { "yes".to_string() });
     env_vars.insert("OVERRIDE_BOOT_MODE".to_string(), if config_values.first().unwrap_or(&String::new()) == "auto" { "no".to_string() } else { "yes".to_string() });
     
-    // Run the installer and capture both stdout and stderr
+    // Run the installer directly and capture both stdout and stderr
     let mut child = Command::new("bash")
-        .arg("./launch_tui_installer.sh")
-        .arg("--bash-only")
+        .arg("./install_arch.sh")
         .envs(&env_vars)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
